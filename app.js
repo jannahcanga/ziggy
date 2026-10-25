@@ -105,7 +105,7 @@ function sendSheet(message, title = 'Copied') {
 /* ================= boot ================= */
 async function boot() {
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
-  app.innerHTML = '<div class="loading">ziggy</div>';
+  app.innerHTML = '<div class="loading"><img src="brand/tulip-chalk-transparent.png" alt="ziggy"></div>';
   try {
     if (CONFIG.supabaseUrl && CONFIG.supabaseKey) {
       const { createSupabaseBackend } = await import('./backend.js');
@@ -130,7 +130,7 @@ async function afterLogin() {
 }
 
 function renderMessage(title, text) {
-  app.innerHTML = `<div class="gate"><div class="wordmark">ziggy</div><div class="gate-hello"><h1>${esc(title)}</h1></div><p class="gate-note" style="margin:18px auto auto">${esc(text)}</p></div>`;
+  app.innerHTML = `<div class="gate"><div class="gate-lines" aria-hidden="true"><i class="v1"></i><i class="v2"></i><i class="h1"></i><i class="h2"></i></div><div class="brand"><img src="brand/tulip-chalk-transparent.png" alt=""><span>ziggy</span></div><div class="gate-hello"><h1>${esc(title)}</h1></div><p class="gate-note" style="margin:18px auto auto">${esc(text)}</p></div>`;
 }
 
 /* ================= login + lock ================= */
@@ -138,7 +138,8 @@ function renderLogin() {
   S.unlocked = false;
   app.innerHTML = `
   <div class="gate">
-    <div class="wordmark">ziggy</div>
+    <div class="gate-lines" aria-hidden="true"><i class="v1"></i><i class="v2"></i><i class="h1"></i><i class="h2"></i></div>
+    <div class="brand"><img src="brand/tulip-chalk-transparent.png" alt=""><span>ziggy</span></div>
     <div class="gate-hello"><h1>sawadee kha</h1><p>sign in once</p></div>
     <form class="login" id="login" autocomplete="on">
       <label class="field"><span>Email</span><input type="email" name="email" required autocomplete="username"></label>
@@ -166,7 +167,8 @@ async function hashPin(pin) {
 function keypad(hello, sub, { forgot } = {}) {
   app.innerHTML = `
   <div class="gate">
-    <div class="wordmark">ziggy</div>
+    <div class="gate-lines" aria-hidden="true"><i class="v1"></i><i class="v2"></i><i class="h1"></i><i class="h2"></i></div>
+    <div class="brand"><img src="brand/tulip-chalk-transparent.png" alt=""><span>ziggy</span></div>
     <div class="gate-hello"><h1>${hello}</h1><p>${sub}</p></div>
     <div class="dots" id="dots" aria-label="Code"><i></i><i></i><i></i><i></i></div>
     <div class="keypad">
@@ -238,13 +240,13 @@ async function loadAll() {
   Object.assign(S, { settings, words, drops, opens, vouchers, timeline, places, checkins });
 }
 async function unlock() {
-  app.innerHTML = '<div class="loading">ziggy</div>';
+  app.innerHTML = '<div class="loading"><img src="brand/tulip-chalk-transparent.png" alt="ziggy"></div>';
   try { await loadAll(); } catch (e) { return renderMessage('Couldn’t load', e.message); }
   S.unlocked = true;
   renderApp();
 }
 async function refresh() {
-  try { await loadAll(); if (!sheetOpen()) renderApp(); } catch {}
+  try { await loadAll(); if (!sheetOpen()) { S.calm = true; renderApp(); } } catch {}
 }
 
 document.addEventListener('visibilitychange', () => {
@@ -281,6 +283,8 @@ function renderApp() {
   $('.nav').onclick = (e) => { const t = e.target.closest('button')?.dataset.tab; if (t && t !== S.tab) { S.tab = t; thump(false); renderApp(); window.scrollTo(0, 0); } };
   $('#settings').onclick = openSettings;
   ({ today: viewToday, wallet: viewWallet, us: viewUs, bangkok: viewBangkok })[S.tab]();
+  if (!S.calm) $('#view').classList.add('enter');
+  S.calm = false;
 }
 
 /* ================= today ================= */
@@ -301,8 +305,31 @@ function nickname(day) {
 }
 
 function drumHTML() {
-  const rods = Array.from({ length: 8 }, (_, i) => `<span class="rod" style="transform: rotate(${i * 45 + 22.5}deg) translateY(calc(var(--d) / -2 + 17px))"></span>`).join('');
-  return `<button class="drum" id="drum" aria-label="Open today's drop">${rods}<span class="label"><span class="seal"></span><b>today’s drop</b><span>tap to open</span></span></button>`;
+  return `<button class="drum" id="drum" aria-label="Open today's drop">
+  <svg viewBox="0 0 300 330" aria-hidden="true">
+    <defs>
+      <radialGradient id="g-lid" cx="42%" cy="30%" r="80%"><stop offset="0" stop-color="#fbfbfa"/><stop offset=".45" stop-color="#a6a6a4"/><stop offset="1" stop-color="#262626"/></radialGradient>
+      <linearGradient id="g-edge" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9a9a98"/><stop offset="1" stop-color="#1a1a1a"/></linearGradient>
+      <linearGradient id="g-glass" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".015"/><stop offset="1" stop-color="#fff" stop-opacity=".11"/></linearGradient>
+      <radialGradient id="g-base" cx="50%" cy="28%" r="75%"><stop offset="0" stop-color="#f4f4f2"/><stop offset=".55" stop-color="#9a9a98"/><stop offset="1" stop-color="#3c3c3c"/></radialGradient>
+      <linearGradient id="g-baseedge" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c4c4c2"/><stop offset="1" stop-color="#2e2e2e"/></linearGradient>
+      <radialGradient id="g-inner" cx="50%" cy="35%" r="70%"><stop offset="0" stop-color="#fff" stop-opacity=".5"/><stop offset="1" stop-color="#fff" stop-opacity=".03"/></radialGradient>
+    </defs>
+    <line class="axis" x1="150" y1="14" x2="150" y2="282"/>
+    <path d="M30 282 v12 a120 30 0 0 0 240 0 v-12" fill="url(#g-baseedge)"/>
+    <ellipse cx="150" cy="282" rx="120" ry="30" fill="url(#g-base)"/>
+    <ellipse cx="150" cy="246" rx="96" ry="24" fill="url(#g-inner)"/>
+    <path class="cross" d="M92 232 L208 260 M208 232 L92 260"/>
+    <path class="gl" d="M30 200 V282 A120 30 0 0 0 270 282 V200" fill="url(#g-glass)"/>
+    <ellipse class="gl" cx="150" cy="200" rx="120" ry="30" fill="rgba(255,255,255,.025)"/>
+    <ellipse class="ring" cx="150" cy="200" rx="120" ry="30"/>
+    <g class="lid">
+      <path d="M62 128 v10 a88 22 0 0 0 176 0 v-10" fill="url(#g-edge)"/>
+      <ellipse cx="150" cy="128" rx="88" ry="22" fill="url(#g-lid)"/>
+    </g>
+    <circle class="seal" cx="150" cy="14" r="3"/>
+  </svg>
+  <span class="label"><b>today\u2019s drop</b><span>tap to open</span></span></button>`;
 }
 function voucherCardHTML(v, no) {
   const tier = ['chrome', 'orchid'].includes(v.tier) ? v.tier : '';
@@ -344,9 +371,9 @@ function viewToday() {
 
   const drum = $('#drum');
   if (drum) drum.onclick = async () => {
-    thump(true);
-    drum.classList.add('hit');
-    const rip = document.createElement('span'); rip.className = 'ripple'; drum.appendChild(rip);
+    setTimeout(() => thump(true), 300);
+    if (drum.classList.contains('strike')) return;
+    drum.classList.add('strike');
     S.openedLocal = TODAY;
     let granted = false;
     if (!PREVIEW) {
@@ -361,7 +388,7 @@ function viewToday() {
     setTimeout(() => {
       $('#stage').innerHTML = dropCardHTML(drop);
       if (granted) { toast('Added to your wallet'); renderNavBadges(); }
-    }, 380);
+    }, 1450);
   };
   v.querySelector('.checkin').onclick = async (e) => {
     const c = CHECKINS.find((x) => x.kind === e.target.closest('button')?.dataset.c);
