@@ -102,6 +102,11 @@ function sendSheet(message, title = 'Copied') {
   (b) => { b.querySelector('[data-close]').onclick = closeSheet; b.querySelector('a').addEventListener('click', () => setTimeout(closeSheet, 400)); });
 }
 
+/* ================= no zooming ================= */
+['gesturestart', 'gesturechange', 'gestureend'].forEach((t) => document.addEventListener(t, (e) => e.preventDefault(), { passive: false }));
+document.addEventListener('touchmove', (e) => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
+// double-tap zoom is blocked with touch-action in styles.css, so quick repeat taps (like 22) still register
+
 /* ================= boot ================= */
 async function boot() {
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
@@ -260,8 +265,6 @@ const mapOpen = () => S.me.who === 'jaa' || (S.settings.map_unlock && TODAY >= S
 
 function renderApp() {
   if (S.tab === 'bangkok' && !mapOpen()) S.tab = 'today';
-  const since = S.settings.since;
-  const dayCount = since ? dayNum(TODAY) - dayNum(since) + 1 : null;
   const seenWallet = Number(localStorage.getItem('ziggy-wallet-seen-' + S.me.who) || 0);
   const walletNew = S.vouchers.some((v) => !v.redeemed_at && v.id > seenWallet);
   const mapNew = !localStorage.getItem('ziggy-map-seen-' + S.me.who);
@@ -271,7 +274,7 @@ function renderApp() {
     <header class="top">
       <div>
         <h1>${esc(name('kc'))} &amp; ${esc(name('jaa'))}</h1>
-        ${dayCount ? `<p class="count">day ${dayCount.toLocaleString('en-US')} of forever and ever${PREVIEW ? ' (preview)' : ''}</p>` : ''}
+        <p class="count" id="count">${togetherText()}</p>
       </div>
       <button class="icon-btn" id="settings" aria-label="Settings">${ICON.gear}</button>
     </header>
@@ -286,6 +289,24 @@ function renderApp() {
   if (!S.calm) $('#view').classList.add('enter');
   S.calm = false;
 }
+
+/* ================= together counter ================= */
+// Counts from when they became official. Change it in Supabase settings with key "together" if ever needed.
+function togetherText() {
+  const [y, m, d] = (S.settings.together || '2025-01-01').split('-').map(Number);
+  const start = new Date(y, m - 1, d);
+  const now = new Date();
+  if (PREVIEW) { const [py, pm, pd] = PREVIEW.split('-').map(Number); now.setFullYear(py, pm - 1, pd); }
+  let years = now.getFullYear() - start.getFullYear();
+  let months = now.getMonth() - start.getMonth();
+  let days = now.getDate() - start.getDate();
+  if (days < 0) { months -= 1; days += new Date(now.getFullYear(), now.getMonth(), 0).getDate(); }
+  if (months < 0) { years -= 1; months += 12; }
+  const hours = now.getHours();
+  const unit = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+  return `${unit(years, 'year')}, ${unit(months, 'month')}, ${unit(days, 'day')}, ${unit(hours, 'hour')} together${PREVIEW ? ' (preview)' : ''}`;
+}
+setInterval(() => { const c = document.getElementById('count'); if (c && S.unlocked) c.textContent = togetherText(); }, 60_000);
 
 /* ================= today ================= */
 function dropFor(day) {
