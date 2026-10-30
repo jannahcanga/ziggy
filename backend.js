@@ -24,9 +24,15 @@ export async function createSupabaseBackend(url, key) {
     opens: () => run(sb.from('opens').select('*')),
     markOpen: (drop_day, who) => run(sb.from('opens').upsert({ drop_day, who }, { onConflict: 'drop_day,who', ignoreDuplicates: true })),
     vouchers: () => run(sb.from('vouchers').select('*').order('id')),
-    addVoucher: (v) => run(sb.from('vouchers').upsert(v, { onConflict: 'from_drop', ignoreDuplicates: true }).select()),
+    // source is unique (special:DATE, level:N), so a treat or reward is only ever given once
+    addVoucher: (v) => run(sb.from('vouchers').upsert(v, { onConflict: 'source', ignoreDuplicates: true }).select()),
     issueVoucher: (v) => run(sb.from('vouchers').insert(v).select()),
-    redeemVoucher: (id) => run(sb.from('vouchers').update({ redeemed_at: new Date().toISOString() }).eq('id', id).select()),
+    redeemVoucher: (id, done = false) => { const now = new Date().toISOString(); return run(sb.from('vouchers').update({ redeemed_at: now, ...(done ? { delivered_at: now } : {}) }).eq('id', id).select()); },
+    deliverVoucher: (id) => run(sb.from('vouchers').update({ delivered_at: new Date().toISOString() }).eq('id', id).select()),
+    xp: () => run(sb.from('xp').select('*').order('id')),
+    // ref is unique (drop:DATE), so the same drop never pays twice; returns [] when it already paid
+    addXp: (row) => run(sb.from('xp').upsert(row, { onConflict: 'ref', ignoreDuplicates: true }).select()),
+    rewards: () => run(sb.from('rewards').select('*').order('sort')),
     timeline: () => run(sb.from('timeline').select('*').order('happened_on')),
     addMoment: (m) => run(sb.from('timeline').insert(m).select()),
     updateMoment: (id, m) => run(sb.from('timeline').update(m).eq('id', id).select()),

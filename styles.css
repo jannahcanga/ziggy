@@ -178,7 +178,8 @@ details.peek { margin-top: 36px; }
 details.peek summary { color: var(--smoke); font-size: 13px; cursor: pointer; list-style: none; }
 details.peek summary::before { content: '+ '; }
 details.peek[open] summary::before { content: '\2013  '; }
-details.peek ol { padding-left: 0; list-style: none; margin: 14px 0 0; display: grid; gap: 10px; font-size: 14px; }
+details.peek ol { padding-left: 0; list-style: none; margin: 14px 0 0; display: grid; gap: 12px; font-size: 14px; }
+details.peek li { display: grid; grid-template-columns: 70px minmax(0, 1fr); color: var(--mist); }
 details.peek li span { color: var(--smoke); display: inline-block; width: 70px; }
 
 /* ---------- wallet ---------- */
@@ -288,3 +289,49 @@ details.peek li span { color: var(--smoke); display: inline-block; width: 70px; 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+/* ---------- together counter (update 3) ---------- */
+.together { all: unset; display: grid; gap: 8px; margin-top: 14px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.together:focus-visible { outline: 1px solid var(--orchid); outline-offset: 6px; border-radius: 8px; }
+.tg-swap { display: grid; gap: 6px; transition: opacity .42s var(--ease), filter .42s var(--ease), transform .42s var(--ease); }
+.tg-swap.out { opacity: 0; filter: blur(8px); transform: translateY(4px); }
+.tg-face { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; min-height: 42px; align-content: flex-end; }
+.tg-face span { white-space: nowrap; }
+.tg-face b { font-weight: 200; font-size: 27px; letter-spacing: -.04em; line-height: 1; font-variant-numeric: tabular-nums; }
+.tg-face small { font-size: 12.5px; color: var(--mist); margin-left: 5px; }
+.tg-face.big b { font-size: 42px; letter-spacing: -.05em; }
+.tg-face.big small { font-size: 14px; }
+.tg-note { font-size: 12px; color: var(--smoke); letter-spacing: .01em; }
+.tg-dots { display: flex; gap: 6px; }
+.tg-dots i { width: 4px; height: 4px; border-radius: 50%; background: var(--dim); transition: background .3s, transform .3s var(--ease); }
+.tg-dots i.on { background: var(--chalk); transform: scale(1.25); }
+
+/* ---------- special drops ---------- */
+.drop.special::after { content: ''; position: absolute; inset: 0; pointer-events: none; border-radius: inherit; box-shadow: inset 0 0 0 1px rgba(169,143,240,.35); }
+.drop .nick-block { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--hair); }
+.drop .nick-block .stack { font-size: 25px; }
+.treat-label { font-size: 12px; color: var(--mist); margin: 24px 0 10px; letter-spacing: .02em; }
+.drop .treat-label + .granted { margin-top: 0; }
+
+/* ---------- XP ---------- */
+.stage { position: relative; }
+.xp { display: grid; gap: 10px; }
+.xp-row { display: flex; align-items: baseline; gap: 8px; }
+.xp-row b { font-weight: 200; font-size: 40px; letter-spacing: -.05em; line-height: 1; font-variant-numeric: tabular-nums; }
+.xp-row span { font-size: 13px; color: var(--mist); }
+.xp-bar { height: 3px; border-radius: 3px; background: rgba(255,255,255,.08); overflow: hidden; }
+.xp-bar i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, rgba(169,143,240,.45), var(--orchid)); box-shadow: 0 0 12px rgba(169,143,240,.7); transition: width 1.2s var(--ease); }
+.xp p { margin: 0; font-size: 13px; color: var(--smoke); }
+.xp-pop { position: absolute; left: 50%; top: -22px; transform: translateX(-50%); font-size: 15px; font-weight: 400; color: var(--orchid); text-shadow: 0 0 14px rgba(169,143,240,.8); pointer-events: none; animation: xpUp 2.2s var(--ease) forwards; }
+@keyframes xpUp { 0% { opacity: 0; transform: translate(-50%, 14px); } 20% { opacity: 1; transform: translate(-50%, 0); } 75% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -26px); } }
+
+/* ---------- to deliver + wallet notes ---------- */
+.deliver { list-style: none; margin: 0; padding: 0; }
+.deliver li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--hair); }
+.deliver li:last-child { border-bottom: 0; }
+.deliver b { display: block; font-weight: 400; }
+.deliver small { color: var(--smoke); font-size: 12px; }
+.wallet-note { font-size: 13px; color: var(--mist); margin: -6px 0 16px; }
+.used.coming li b { text-decoration: none; color: var(--chalk); }
+.used li .btn { margin: -6px 0; }
+details.peek li b { font-weight: 400; color: var(--chalk); }

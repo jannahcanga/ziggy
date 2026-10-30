@@ -28,18 +28,11 @@ const ICON = {
   gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>',
 };
 
-const CHECKINS = [
-  { kind: 'need', label: 'need you, don’t ask', hint: 'no questions asked' },
-  { kind: 'call', label: 'call me', hint: 'whenever you can' },
-  { kind: 'hug', label: 'just a hug', hint: 'from far away' },
-  { kind: 'okay', label: 'i’m okay', hint: 'just tired' },
-];
+const XP = { daily: 2, special: 5, perReward: 100 };
 const CATS = { eat: 'Eat', matcha: 'Matcha and coffee', shop: 'Shop', rides: 'Rides and fun', gl: 'GL spots', sights: 'Sights', night: 'Night out', stay: 'Stay' };
-const KIND_LABEL = { thai: 'Today’s Thai', stack: 'Nickname of the day', photo: 'Photo prompt', dare: 'A dare', bet: 'A bet', sie: 'Sie word of the day', flashback: 'Flashback', unlock: 'Something new' };
 
 const who = (w) => S.members?.find((m) => m.who === w);
 const name = (w) => who(w)?.display || w;
-const messengerUrl = (handle) => handle ? `https://m.me/${encodeURIComponent(handle)}` : 'https://www.messenger.com/';
 
 /* ================= sound ================= */
 let audio;
@@ -83,23 +76,12 @@ function openSheet(html, onMount) {
 function closeSheet() { $('#sheet-root').innerHTML = ''; }
 const sheetOpen = () => !!$('#sheet-root').firstChild;
 
-async function copyText(text) {
-  try { await navigator.clipboard.writeText(text); return true; } catch {
-    const ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
-    document.body.appendChild(ta); ta.select();
-    let ok = false; try { ok = document.execCommand('copy'); } catch {}
-    ta.remove(); return ok;
-  }
-}
-function sendSheet(message, title = 'Copied') {
-  const p = S.partner;
-  openSheet(`
-    <h2>${esc(title)}</h2>
-    <p class="lead">Paste it in your chat with ${esc(p?.display)}.</p>
-    <p class="quote">${esc(message)}</p>
-    <div class="row"><a class="btn" href="${esc(messengerUrl(p?.messenger))}" target="_blank" rel="noopener">Open Messenger</a></div>
-    <div class="row"><button class="btn quiet" data-close>Done</button></div>`,
-  (b) => { b.querySelector('[data-close]').onclick = closeSheet; b.querySelector('a').addEventListener('click', () => setTimeout(closeSheet, 400)); });
+/* ================= heads-up for baby Jaa ================= */
+// Sends a notification to the ntfy app on baby Jaa's phone. The topic lives in Supabase settings, never on GitHub.
+function notifyJaa(title, message) {
+  const topic = S.settings?.notify_topic;
+  if (!topic || S.me?.who !== 'kc' || PREVIEW || S.be?.demo) return;
+  fetch('https://ntfy.sh/', { method: 'POST', body: JSON.stringify({ topic, title, message, tags: ['tulip'], priority: 4 }) }).catch(() => {});
 }
 
 /* ================= no zooming ================= */
@@ -239,10 +221,11 @@ function renderSetPin(changing = false) {
 /* ================= data ================= */
 async function loadAll() {
   const be = S.be;
-  const [settings, words, drops, opens, vouchers, timeline, places, checkins] = await Promise.all([
-    be.settings(), be.words(), be.drops(), be.opens(), be.vouchers(), be.timeline(), be.places(), be.checkins(),
+  const soft = (p) => p.catch(() => []); // xp and rewards stay empty until update 3's SQL has run
+  const [settings, words, drops, opens, vouchers, timeline, places, xp, rewards] = await Promise.all([
+    be.settings(), be.words(), be.drops(), be.opens(), be.vouchers(), be.timeline(), be.places(), soft(be.xp()), soft(be.rewards()),
   ]);
-  Object.assign(S, { settings, words, drops, opens, vouchers, timeline, places, checkins });
+  Object.assign(S, { settings, words, drops, opens, vouchers, timeline, places, xp, rewards });
 }
 async function unlock() {
   app.innerHTML = '<div class="loading"><img src="brand/tulip-chalk-transparent.png" alt="ziggy"></div>';
@@ -274,7 +257,7 @@ function renderApp() {
     <header class="top">
       <div>
         <h1>${esc(name('kc'))} &amp; ${esc(name('jaa'))}</h1>
-        <p class="count" id="count">${togetherText()}</p>
+        ${counterHTML()}
       </div>
       <button class="icon-btn" id="settings" aria-label="Settings">${ICON.gear}</button>
     </header>
@@ -285,47 +268,113 @@ function renderApp() {
   </nav>`;
   $('.nav').onclick = (e) => { const t = e.target.closest('button')?.dataset.tab; if (t && t !== S.tab) { S.tab = t; thump(false); renderApp(); window.scrollTo(0, 0); } };
   $('#settings').onclick = openSettings;
+  bindCounter();
   ({ today: viewToday, wallet: viewWallet, us: viewUs, bangkok: viewBangkok })[S.tab]();
   if (!S.calm) $('#view').classList.add('enter');
   S.calm = false;
 }
 
 /* ================= together counter ================= */
-// Counts from when they became official. Change it in Supabase settings with key "together" if ever needed.
-function togetherText() {
-  const [y, m, d] = (S.settings.together || '2025-01-01').split('-').map(Number);
-  const start = new Date(y, m - 1, d);
+// Counts from when you became official. A "together" row in Supabase settings can change it.
+const ord = (n) => n + (['th', 'st', 'nd', 'rd'][(n % 100 - 20) % 10] || ['th', 'st', 'nd', 'rd'][n % 100] || 'th');
+const plural = (n, w) => `${w}${n === 1 ? '' : 's'}`;
+function startParts() { return (S.settings.together || '2025-01-01').split('-').map(Number); }
+function together() {
+  const [y, m, d] = startParts();
   const now = new Date();
   if (PREVIEW) { const [py, pm, pd] = PREVIEW.split('-').map(Number); now.setFullYear(py, pm - 1, pd); }
-  let years = now.getFullYear() - start.getFullYear();
-  let months = now.getMonth() - start.getMonth();
-  let days = now.getDate() - start.getDate();
+  let years = now.getFullYear() - y, months = now.getMonth() - (m - 1), days = now.getDate() - d;
   if (days < 0) { months -= 1; days += new Date(now.getFullYear(), now.getMonth(), 0).getDate(); }
   if (months < 0) { years -= 1; months += 12; }
-  const hours = now.getHours();
-  const unit = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
-  return `${unit(years, 'year')}, ${unit(months, 'month')}, ${unit(days, 'day')}, ${unit(hours, 'hour')} together${PREVIEW ? ' (preview)' : ''}`;
+  const totalMonths = years * 12 + months;
+  const totalDays = Math.round((Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) - Date.UTC(y, m - 1, d)) / 864e5);
+  const isToday = days === 0 && totalMonths > 0;
+  const next = new Date(now.getFullYear(), now.getMonth() + (now.getDate() >= d ? 1 : 0), d);
+  const toNext = Math.round((Date.UTC(next.getFullYear(), next.getMonth(), next.getDate()) - Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())) / 864e5);
+  return { years, months, days, hours: now.getHours(), totalMonths, totalDays, isToday, toNext };
 }
-setInterval(() => { const c = document.getElementById('count'); if (c && S.unlocked) c.textContent = togetherText(); }, 60_000);
+function milestoneName(n) { return n % 12 === 0 ? `${ord(n / 12)} anniversary` : `${ord(n)} monthsary`; }
+const FACES = ['full', 'months', 'days'];
+function faceHTML(face) {
+  const t = together();
+  const num = (n, w) => `<span><b>${n.toLocaleString('en-US')}</b><small>${plural(n, w)}</small></span>`;
+  if (face === 'months') {
+    const note = t.isToday ? `Happy ${milestoneName(t.totalMonths)}, today` : `${milestoneName(t.totalMonths + 1)} in ${t.toNext} ${plural(t.toNext, 'day')}`;
+    return [`<span class="tg-face big">${num(t.totalMonths, 'month')}</span>`, note];
+  }
+  if (face === 'days') return [`<span class="tg-face big">${num(t.totalDays, 'day')}</span>`, 'and counting'];
+  return [`<span class="tg-face">${num(t.years, 'year')}${num(t.months, 'month')}${num(t.days, 'day')}${num(t.hours, 'hour')}</span>`, 'together since January 1, 2025'];
+}
+function counterHTML() {
+  S.face ??= together().isToday ? 1 : 0;
+  const [face, note] = faceHTML(FACES[S.face]);
+  return `<button class="together" id="together" aria-label="Time together. Tap to switch between years, months and days.">
+    <span class="tg-swap" id="tg-swap">${face}<span class="tg-note">${note}${PREVIEW ? ' (preview)' : ''}</span></span>
+    <span class="tg-dots" aria-hidden="true">${FACES.map((_, i) => `<i class="${i === S.face ? 'on' : ''}"></i>`).join('')}</span>
+  </button>`;
+}
+function showFace(i) {
+  S.face = (i + FACES.length) % FACES.length;
+  const swap = $('#tg-swap'); if (!swap) return;
+  const paint = () => {
+    const [face, note] = faceHTML(FACES[S.face]);
+    swap.innerHTML = `${face}<span class="tg-note">${note}${PREVIEW ? ' (preview)' : ''}</span>`;
+    document.querySelectorAll('.tg-dots i').forEach((d, k) => d.classList.toggle('on', k === S.face));
+    swap.classList.remove('out');
+  };
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return paint();
+  swap.classList.add('out'); setTimeout(paint, 420);
+}
+function bindCounter() {
+  const btn = $('#together'); if (!btn) return;
+  btn.onclick = () => { S.pauseUntil = Date.now() + 15000; showFace(S.face + 1); };
+}
+// switches every 5 seconds; a tap moves it along and pauses the switching for 15 seconds
+setInterval(() => {
+  if (!S.unlocked || document.hidden || Date.now() < (S.pauseUntil || 0)) return;
+  showFace(S.face + 1);
+}, 5000);
 
 /* ================= today ================= */
-function dropFor(day) {
-  const pinned = S.drops.filter((d) => d.show_on === day);
-  if (pinned.length) return pinned[0];
-  const pool = S.drops.filter((d) => !d.show_on).sort((a, b) => hashId(a.id) - hashId(b.id));
-  if (!pool.length) return null;
-  return pool[((dayNum(day) % pool.length) + pool.length) % pool.length];
+// A special day is a pinned drop (Nov 1, 10, 11, 12 and any you add in Supabase) or a monthsary.
+function specialFor(day) {
+  const [sy, sm, sd] = startParts();
+  const [y, m, d] = day.split('-').map(Number);
+  const pinned = S.drops.find((x) => x.show_on === day) || null;
+  const monthsN = (y - sy) * 12 + (m - sm);
+  const monthsary = d === sd && monthsN > 0 ? monthsN : 0;
+  if (!pinned && !monthsary) return null;
+  return { day, pinned, monthsary };
+}
+function treatFor(sp) {
+  if (!sp) return null;
+  if (sp.pinned?.voucher_title) return { title: sp.pinned.voucher_title, sub: sp.pinned.voucher_sub, tier: sp.pinned.voucher_tier || 'orchid' };
+  const list = S.rewards.filter((r) => r.kind === 'special').sort((a, b) => a.sort - b.sort);
+  if (!list.length) return null;
+  const r = list[((dayNum(sp.day) % list.length) + list.length) % list.length];
+  return { title: r.title, sub: r.sub, tier: r.tier };
 }
 function nickname(day) {
   const r = rng(dayNum(day) * 7919);
   const adj = S.words.filter((w) => w.kind === 'adj').map((w) => w.word);
   const noun = S.words.filter((w) => w.kind === 'noun').map((w) => w.word);
+  const clash = (a, b) => a.includes(b) || b.includes(a);
+  const want = Math.min(r() < 0.5 ? 3 : 4, adj.length);
   const picked = [];
-  while (picked.length < Math.min(3, adj.length)) { const w = adj[Math.floor(r() * adj.length)]; if (!picked.includes(w)) picked.push(w); }
-  return `my ${picked.join(' ')} ${noun[Math.floor(r() * noun.length)] || 'baby'}`;
+  for (let tries = 0; picked.length < want && tries < 200; tries++) {
+    const w = adj[Math.floor(r() * adj.length)];
+    if (!picked.some((p) => clash(p, w))) picked.push(w);
+  }
+  let n = 'baby';
+  for (let tries = 0; tries < 20 && noun.length; tries++) {
+    n = noun[Math.floor(r() * noun.length)];
+    if (!picked.some((p) => clash(p, n))) break;
+  }
+  return `my ${picked.join(' ')} ${n}`;
 }
+const xpTotal = () => S.xp.filter((x) => x.who === 'kc').reduce((a, x) => a + x.amount, 0);
 
-function drumHTML() {
+function drumHTML(sp) {
   return `<button class="drum" id="drum" aria-label="Open today's drop">
   <svg viewBox="0 0 300 330" aria-hidden="true">
     <defs>
@@ -350,76 +399,131 @@ function drumHTML() {
     </g>
     <circle class="seal" cx="150" cy="14" r="3"/>
   </svg>
-  <span class="label"><b>today\u2019s drop</b><span>tap to open</span></span></button>`;
+  <span class="label"><b>${sp ? 'a special drop' : 'today’s drop'}</b><span>${S.me.who === 'kc' ? `tap to open, +${sp ? XP.special : XP.daily} XP` : 'tap to open'}</span></span></button>`;
 }
 function voucherCardHTML(v, no) {
   const tier = ['chrome', 'orchid'].includes(v.tier) ? v.tier : '';
   return `<div class="vcard ${tier}">
-    <div class="v-top"><div class="v-title">${esc(v.title)}</div><div class="v-no">No. ${String(no).padStart(3, '0')}</div></div>
+    <div class="v-top"><div class="v-title">${esc(v.title)}</div>${no ? `<div class="v-no">No. ${String(no).padStart(3, '0')}</div>` : ''}</div>
     ${v.sub ? `<div class="v-sub">${esc(v.sub)}</div>` : ''}
     <div class="v-foot"><div>issued by ${esc(name(v.issued_by || 'jaa'))}<br>valid JK forever and ever</div><div class="v-mono" aria-hidden="true">JK</div></div>
   </div>`;
 }
-function dropCardHTML(d) {
-  if (!d) return `<div class="drop"><p class="kind">Today</p><h3>No drop today</h3><p class="body">Even ziggy needs a day off.</p></div>`;
-  const label = KIND_LABEL[d.kind] || `From ${name('jaa')}`;
-  let inner;
-  if (d.kind === 'thai') inner = `<h3 class="thai" lang="th">${esc(d.title)}</h3><p class="say">${esc(d.body)}</p>${d.extra ? `<p class="extra">${esc(d.extra)}</p>` : ''}`;
-  else if (d.kind === 'stack') inner = `<p class="extra" style="margin:0 0 10px">${esc(d.body || 'Today you are officially')}</p><p class="stack">${esc(nickname(TODAY))}</p>`;
-  else inner = `<h3>${esc(d.title)}</h3>${d.body ? `<p class="body">${esc(d.body)}</p>` : ''}${d.extra ? `<p class="extra">${esc(d.extra)}</p>` : ''}`;
-  const sendable = ['photo', 'dare', 'bet'].includes(d.kind) && S.me.who === 'kc';
-  const granted = d.voucher_title ? `<div class="granted">${voucherCardHTML({ title: d.voucher_title, sub: d.voucher_sub, tier: d.voucher_tier, issued_by: 'jaa' }, S.vouchers.length + (PREVIEW ? 1 : 0))}</div>` : '';
-  return `<div class="drop"><p class="kind">${esc(label)}</p>${inner}${granted}
-    ${sendable ? `<div class="v-actions"><a class="btn line small" href="${esc(messengerUrl(S.partner?.messenger))}" target="_blank" rel="noopener">Send it to ${esc(S.partner.display)}</a></div>` : ''}</div>`;
+function dropCardHTML(sp) {
+  const nick = `<p class="extra" style="margin:0 0 10px">Today you are officially</p><p class="stack">${esc(nickname(TODAY))}</p>`;
+  if (!sp) return `<div class="drop"><p class="kind">Nickname of the day</p>${nick}</div>`;
+  const p = sp.pinned;
+  const label = sp.monthsary && !p ? 'A special day' : 'A special drop';
+  const title = p ? p.title : `Happy ${milestoneName(sp.monthsary)}`;
+  const body = p ? p.body : sp.monthsary % 12 === 0
+    ? `${sp.monthsary / 12} ${plural(sp.monthsary / 12, 'year')} since we made it official. JK forever and ever.`
+    : `${sp.monthsary} months since we made it official. Still choosing you, every single day.`;
+  const also = p && sp.monthsary ? `<p class="extra">It’s also our ${milestoneName(sp.monthsary)}.</p>` : '';
+  const treat = treatFor(sp);
+  return `<div class="drop special"><p class="kind">${label}</p><h3>${esc(title)}</h3>${body ? `<p class="body">${esc(body)}</p>` : ''}${also}
+    <div class="nick-block">${nick}</div>
+    ${treat ? `<p class="treat-label">${S.me.who === 'kc' ? 'Today’s treat, now in your wallet' : `Today’s treat for ${esc(name('kc'))}`}</p><div class="granted">${voucherCardHTML({ ...treat, issued_by: 'jaa' })}</div>` : ''}</div>`;
+}
+function xpHTML() {
+  const total = xpTotal(), into = total % XP.perReward, left = XP.perReward - into;
+  const mine = S.me.who === 'kc';
+  return `<div class="section-head"><h2>${mine ? 'Your XP' : `${esc(name('kc'))}’s XP`}</h2></div>
+    <div class="xp" id="xp">
+      <div class="xp-row"><b id="xp-total">${total}</b><span>XP</span></div>
+      <div class="xp-bar" role="progressbar" aria-valuemin="0" aria-valuemax="${XP.perReward}" aria-valuenow="${into}"><i style="width:${into}%"></i></div>
+      <p>${left} XP to ${mine ? 'your' : 'her'} next reward. ${mine ? 'You earn' : 'She earns'} ${XP.daily} a day, and ${XP.special} on special days.</p>
+    </div>`;
+}
+function toDeliverHTML() {
+  if (S.me.who !== 'jaa') return '';
+  const list = S.vouchers.filter((v) => v.redeemed_at && !v.delivered_at).sort((a, b) => a.redeemed_at.localeCompare(b.redeemed_at));
+  if (!list.length) return '';
+  return `<div class="section-head"><h2>To deliver</h2></div>
+    <ul class="deliver" id="deliver">${list.map((v) => `<li><span><b>${esc(v.title)}</b><small>used ${fmt(v.redeemed_at.slice(0, 10), { month: 'short', day: 'numeric' })}</small></span><button class="btn line small" data-deliver="${v.id}">Delivered</button></li>`).join('')}</ul>`;
 }
 
 function viewToday() {
   const v = $('#view');
-  const drop = dropFor(TODAY);
+  const sp = specialFor(TODAY);
   const opened = S.opens.some((o) => o.drop_day === TODAY && o.who === S.me.who) || S.openedLocal === TODAY;
-  const theirs = S.checkins.filter((c) => c.by_who === S.partner?.who).slice(0, 3);
-  const upcoming = S.me.who === 'jaa' ? Array.from({ length: 7 }, (_, i) => addDays(TODAY, i + 1)).map((day) => [day, dropFor(day)]) : [];
+  const upcoming = S.me.who === 'jaa' ? Array.from({ length: 7 }, (_, i) => addDays(TODAY, i + 1)).map((day) => [day, specialFor(day)]) : [];
   v.innerHTML = `
     <p class="today-date">${fmt(TODAY, { weekday: 'long', month: 'long', day: 'numeric' })}</p>
-    <div class="stage" id="stage">${opened ? dropCardHTML(drop) : drumHTML()}</div>
-    <div class="section-head"><h2>Tell ${esc(S.partner?.display)} without explaining</h2></div>
-    <div class="checkin">${CHECKINS.map((c) => `<button data-c="${c.kind}">${esc(c.label)}<small>${esc(c.hint)}</small></button>`).join('')}</div>
-    ${theirs.length ? `<div class="section-head"><h2>Latest from ${esc(S.partner.display)}</h2></div>
-      <ul class="feed">${theirs.map((c) => `<li><span>${esc(c.label)}</span><time>${fmtTime(c.created_at)}</time></li>`).join('')}</ul>` : ''}
+    <div class="stage" id="stage">${opened ? dropCardHTML(sp) : drumHTML(sp)}</div>
+    ${toDeliverHTML()}
+    ${xpHTML()}
     ${upcoming.length ? `<details class="peek"><summary>Coming up (only you see this)</summary><ol>
-      ${upcoming.map(([day, d]) => `<li><span>${fmt(day, { month: 'short', day: 'numeric' })}</span>${esc(d ? (d.kind === 'stack' ? 'Nickname of the day' : d.title) : 'nothing')}${d?.show_on ? ' (pinned)' : ''}</li>`).join('')}
+      ${upcoming.map(([day, s]) => `<li><span>${fmt(day, { month: 'short', day: 'numeric' })}</span><span>${s ? `<b>${esc(s.pinned ? s.pinned.title : `Happy ${milestoneName(s.monthsary)}`)}</b>, +${XP.special} XP and a treat` : esc(nickname(day))}</span></li>`).join('')}
     </ol></details>` : ''}`;
+
+  $('#deliver')?.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-deliver]'); if (!b) return;
+    b.disabled = true;
+    try { await S.be.deliverVoucher(Number(b.dataset.deliver)); S.vouchers = await S.be.vouchers(); thump(false); toast('Marked delivered'); viewToday(); }
+    catch { toast('Didn’t save. Try again.'); b.disabled = false; }
+  });
 
   const drum = $('#drum');
   if (drum) drum.onclick = async () => {
-    setTimeout(() => thump(true), 300);
     if (drum.classList.contains('strike')) return;
     drum.classList.add('strike');
+    setTimeout(() => thump(true), 300);
     S.openedLocal = TODAY;
-    let granted = false;
+    const isKC = S.me.who === 'kc';
+    let gained = 0, unlocked = [];
     if (!PREVIEW) {
       try {
         await S.be.markOpen(TODAY, S.me.who);
-        if (drop?.voucher_title) {
-          await S.be.addVoucher({ title: drop.voucher_title, sub: drop.voucher_sub, tier: drop.voucher_tier || 'black', from_drop: TODAY, issued_by: 'jaa' });
-          S.vouchers = await S.be.vouchers(); granted = true;
-        }
+        if (isKC) ({ gained, unlocked } = await awardDrop(sp));
       } catch (e) { toast('Opened, but didn’t save. Check your connection.'); }
     }
     setTimeout(() => {
-      $('#stage').innerHTML = dropCardHTML(drop);
-      if (granted) { toast('Added to your wallet'); renderNavBadges(); }
+      $('#stage').innerHTML = dropCardHTML(sp);
+      if (gained) {
+        const pop = document.createElement('span'); pop.className = 'xp-pop'; pop.textContent = `+${gained} XP`;
+        $('#stage').appendChild(pop);
+        const fresh = document.createElement('div'); fresh.innerHTML = xpHTML();
+        $('#xp')?.replaceWith(fresh.querySelector('#xp'));
+        renderNavBadges();
+      }
+      if (unlocked.length) setTimeout(() => rewardSheet(unlocked), 1300);
     }, 1450);
   };
-  v.querySelector('.checkin').onclick = async (e) => {
-    const c = CHECKINS.find((x) => x.kind === e.target.closest('button')?.dataset.c);
-    if (!c) return;
-    thump(false);
-    const msg = `${c.label} \u{1F5A4}`;
-    await copyText(msg);
-    sendSheet(msg);
-    if (!PREVIEW) S.be.addCheckin({ kind: c.kind, label: c.label, by_who: S.me.who }).catch(() => toast('Didn’t save, but the message is copied.'));
-  };
+}
+
+// Gives baby KC her XP for today's drop, today's treat on special days, and any 100 XP rewards she has reached.
+async function awardDrop(sp) {
+  const be = S.be;
+  const amount = sp ? XP.special : XP.daily;
+  const rows = await be.addXp({ who: 'kc', amount, reason: sp ? 'special day drop' : 'daily drop', ref: 'drop:' + TODAY });
+  const gained = rows.length ? amount : 0;
+  const treat = treatFor(sp);
+  if (treat) await be.addVoucher({ ...treat, issued_by: 'jaa', source: 'special:' + TODAY });
+  S.xp = await be.xp();
+  const unlocked = [];
+  const level = Math.floor(xpTotal() / XP.perReward);
+  const prizes = S.rewards.filter((r) => r.kind === 'level').sort((a, b) => a.sort - b.sort);
+  if (prizes.length) {
+    const have = new Set(S.vouchers.map((v) => v.source));
+    for (let L = 1; L <= level; L++) {
+      if (have.has('level:' + L)) continue;
+      const r = prizes[(L - 1) % prizes.length];
+      const made = await be.addVoucher({ title: r.title, sub: r.sub, tier: r.tier, issued_by: 'jaa', source: 'level:' + L });
+      if (made.length) { unlocked.push({ ...r, xp: L * XP.perReward }); notifyJaa('baby KC unlocked a reward', `${L * XP.perReward} XP: ${r.title}`); }
+    }
+  }
+  S.vouchers = await be.vouchers();
+  return { gained, unlocked };
+}
+function rewardSheet(list) {
+  const r = list[list.length - 1];
+  thump(true);
+  openSheet(`<h2>${r.xp} XP</h2><p class="lead">You unlocked a reward. It’s already in your wallet, so use it whenever you want. No asking needed.</p>
+    <div class="granted" style="margin:0 0 22px">${voucherCardHTML({ ...r, issued_by: 'jaa' })}</div>
+    <div class="row"><button class="btn" data-go>See my wallet</button></div><div class="row"><button class="btn quiet" data-close>Later</button></div>`, (b) => {
+    b.querySelector('[data-close]').onclick = closeSheet;
+    b.querySelector('[data-go]').onclick = () => { closeSheet(); S.tab = 'wallet'; renderApp(); };
+  });
 }
 function renderNavBadges() {
   const seen = Number(localStorage.getItem('ziggy-wallet-seen-' + S.me.who) || 0);
@@ -431,19 +535,23 @@ function viewWallet() {
   const v = $('#view');
   const numbered = S.vouchers.slice().sort((a, b) => a.id - b.id).map((x, i) => ({ ...x, no: i + 1 }));
   const active = numbered.filter((x) => !x.redeemed_at);
-  const used = numbered.filter((x) => x.redeemed_at).sort((a, b) => b.redeemed_at.localeCompare(a.redeemed_at));
+  const coming = numbered.filter((x) => x.redeemed_at && !x.delivered_at).sort((a, b) => b.redeemed_at.localeCompare(a.redeemed_at));
+  const used = numbered.filter((x) => x.redeemed_at && x.delivered_at).sort((a, b) => b.redeemed_at.localeCompare(a.redeemed_at));
   const maxId = Math.max(0, ...S.vouchers.map((x) => x.id));
-  localStorage.setItem('ziggy-wallet-seen-' + S.me.who, String(maxId));
+  try { localStorage.setItem('ziggy-wallet-seen-' + S.me.who, String(maxId)); } catch {}
   const isKC = S.me.who === 'kc';
+  const day = (iso) => fmt(iso.slice(0, 10), { month: 'short', day: 'numeric' });
   v.innerHTML = `
-    <div class="section-head" style="margin-top:22px"><h2>${active.length} ${active.length === 1 ? 'voucher' : 'vouchers'} to use</h2>
+    <div class="section-head" style="margin-top:22px"><h2>${active.length} ${plural(active.length, 'voucher')} to use</h2>
       ${!isKC ? '<button class="btn line small" id="issue">Issue a voucher</button>' : ''}</div>
+    ${isKC && active.length ? `<p class="wallet-note">These are yours. Tap one and use it whenever you like, no need to ask.</p>` : ''}
     ${active.length ? `<div class="cards" id="cards">${active.map((x) => `
       <div class="vwrap" data-id="${x.id}">
         <button class="vbtn" aria-expanded="false" style="all:unset;display:block;width:100%;cursor:pointer">${voucherCardHTML(x, x.no)}</button>
-        <div class="v-actions">${isKC ? `<button class="btn" data-redeem="${x.id}">Redeem</button>` : `<p class="muted small" style="margin:4px 0 0">Waiting for ${esc(name('kc'))} to use it.</p>`}</div>
+        <div class="v-actions">${isKC ? `<button class="btn" data-redeem="${x.id}">Use it</button>` : `<p class="muted small" style="margin:4px 0 0">Waiting for ${esc(name('kc'))} to use it.</p>`}</div>
       </div>`).join('')}</div>` : `<p class="empty">Nothing in the wallet right now. Keep opening your drops.</p>`}
-    ${used.length ? `<div class="section-head"><h2>Used</h2></div><ul class="used">${used.map((x) => `<li><b>${esc(x.title)}</b><span>${fmt(x.redeemed_at.slice(0, 10), { month: 'short', day: 'numeric' })}</span></li>`).join('')}</ul>` : ''}`;
+    ${coming.length ? `<div class="section-head"><h2>On its way</h2></div><ul class="used coming" id="coming">${coming.map((x) => `<li><b>${esc(x.title)}</b><span>${isKC ? `used ${day(x.redeemed_at)}` : `<button class="btn line small" data-deliver="${x.id}">Delivered</button>`}</span></li>`).join('')}</ul>` : ''}
+    ${used.length ? `<div class="section-head"><h2>Used</h2></div><ul class="used">${used.map((x) => `<li><b>${esc(x.title)}</b><span>${day(x.redeemed_at)}</span></li>`).join('')}</ul>` : ''}`;
 
   const cards = $('#cards');
   if (cards) {
@@ -457,24 +565,29 @@ function viewWallet() {
       [...cards.children].forEach((w) => w.classList.toggle('open', w === wrap));
     };
   }
+  $('#coming')?.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-deliver]'); if (!b) return;
+    b.disabled = true;
+    try { await S.be.deliverVoucher(Number(b.dataset.deliver)); S.vouchers = await S.be.vouchers(); thump(false); toast('Marked delivered'); viewWallet(); }
+    catch { toast('Didn’t save. Try again.'); b.disabled = false; }
+  });
   $('#issue')?.addEventListener('click', issueVoucher);
 }
+// Using a voucher is quiet: no message to send. baby Jaa gets a heads-up and it shows in her To deliver list.
 function redeem(id) {
   const x = S.vouchers.find((v) => v.id === id);
-  openSheet(`<h2>Use this voucher?</h2><p class="lead">${esc(name('jaa'))} gets a message to make it happen.</p>
+  openSheet(`<h2>Use this one?</h2><p class="lead">${esc(name('jaa'))} gets a quiet heads-up and takes it from there. Nothing to send, nothing to ask.</p>
     <p class="quote">${esc(x.title)}${x.sub ? `, ${esc(x.sub)}` : ''}</p>
-    <div class="row"><button class="btn" data-yes>Redeem</button></div><div class="row"><button class="btn quiet" data-no>Not yet</button></div>`, (b) => {
+    <div class="row"><button class="btn" data-yes>Use it</button></div><div class="row"><button class="btn quiet" data-no>Not yet</button></div>`, (b) => {
     b.querySelector('[data-no]').onclick = closeSheet;
     b.querySelector('[data-yes]').onclick = async (e) => {
       e.target.disabled = true;
       try {
         await S.be.redeemVoucher(id);
         thump(true);
-        const msg = `Redeeming: ${x.title}${x.sub ? ` (${x.sub})` : ''}. Pay up, ${name('jaa')} \u{1F5A4}`;
-        await copyText(msg);
+        notifyJaa('baby KC used a voucher', `${x.title}${x.sub ? `, ${x.sub}` : ''}`);
         S.vouchers = await S.be.vouchers();
-        viewWallet();
-        sendSheet(msg, 'Redeemed and copied');
+        closeSheet(); viewWallet(); toast('On its way');
       } catch (err) { toast('Didn’t go through. Try again.'); e.target.disabled = false; }
     };
   });
@@ -618,7 +731,7 @@ function placeSheet(p) {
       if (s === 'veto') {
         if (!isKC) return toast(`Only ${name('kc')} can veto`);
         if (!vetoVoucher) return toast('No Bangkok veto in your wallet');
-        await S.be.redeemVoucher(vetoVoucher.id);
+        await S.be.redeemVoucher(vetoVoucher.id, true);
         S.vouchers = await S.be.vouchers();
         thump(true); toast('Vetoed. Voucher used.');
       }
@@ -704,7 +817,7 @@ function openSettings() {
     b.querySelector('#s-code').onclick = () => { closeSheet(); renderSetPin(true); };
     b.querySelector('#s-sound').onclick = (e) => { const on = localStorage.getItem('ziggy-sound') === 'off'; localStorage.setItem('ziggy-sound', on ? 'on' : 'off'); e.target.textContent = `Sound: ${on ? 'on' : 'off'}`; if (on) thump(false); };
     b.querySelector('#s-backup').onclick = () => {
-      const data = { exported: new Date().toISOString(), timeline: S.timeline, places: S.places, vouchers: S.vouchers, checkins: S.checkins };
+      const data = { exported: new Date().toISOString(), timeline: S.timeline, places: S.places, vouchers: S.vouchers, xp: S.xp };
       const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
       a.download = `ziggy-backup-${TODAY}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
     };

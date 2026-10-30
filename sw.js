@@ -1,4 +1,4 @@
-const CACHE = 'ziggy-v2';
+const CACHE = 'ziggy-v3';
 const SHELL = ['./', './index.html', './styles.css', './app.js', './backend.js', './config.js', './manifest.webmanifest', './icons/icon-192.png', './brand/tulip-chalk-transparent.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => {
