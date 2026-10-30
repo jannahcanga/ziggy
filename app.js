@@ -1,4 +1,5 @@
 import { CONFIG } from './config.js';
+import { catSVG, giftSVG, EXPRESSIONS } from './cat.js';
 
 /* ================= helpers ================= */
 const $ = (s, r = document) => r.querySelector(s);
@@ -34,30 +35,9 @@ const CATS = { eat: 'Eat', matcha: 'Matcha and coffee', shop: 'Shop', rides: 'Ri
 const who = (w) => S.members?.find((m) => m.who === w);
 const name = (w) => who(w)?.display || w;
 
-/* ================= sound ================= */
-let audio;
-function thump(strong = true) {
-  if (localStorage.getItem('ziggy-sound') === 'off') return;
-  try {
-    audio ||= new (window.AudioContext || window.webkitAudioContext)();
-    const t = audio.currentTime;
-    const o = audio.createOscillator(), g = audio.createGain();
-    o.type = 'sine';
-    o.frequency.setValueAtTime(strong ? 150 : 110, t);
-    o.frequency.exponentialRampToValueAtTime(40, t + 0.28);
-    g.gain.setValueAtTime(strong ? 1 : 0.6, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + 0.55);
-    o.connect(g).connect(audio.destination);
-    o.start(t); o.stop(t + 0.6);
-    // the beater click on the head
-    const buf = audio.createBuffer(1, audio.sampleRate * 0.02, audio.sampleRate);
-    const ch = buf.getChannelData(0); for (let i = 0; i < ch.length; i++) ch[i] = (Math.random() * 2 - 1) * (1 - i / ch.length);
-    const n = audio.createBufferSource(), ng = audio.createGain(), f = audio.createBiquadFilter();
-    f.type = 'lowpass'; f.frequency.value = 2400; ng.gain.value = 0.25;
-    n.buffer = buf; n.connect(f).connect(ng).connect(audio.destination); n.start(t);
-  } catch {}
-  navigator.vibrate?.(strong ? 35 : 15);
-}
+/* ================= touch feedback ================= */
+// No sound. Just a light buzz on phones that support it (Android; iPhones ignore it).
+function thump(strong = true) { navigator.vibrate?.(strong ? 30 : 12); }
 
 /* ================= ui bits ================= */
 function toast(msg) {
@@ -88,6 +68,12 @@ function notifyJaa(title, message) {
 ['gesturestart', 'gesturechange', 'gestureend'].forEach((t) => document.addEventListener(t, (e) => e.preventDefault(), { passive: false }));
 document.addEventListener('touchmove', (e) => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
 // double-tap zoom is blocked with touch-action in styles.css, so quick repeat taps (like 22) still register
+
+/* ================= cat blinks ================= */
+setInterval(() => {
+  if (document.hidden || Math.random() < 0.35) return;
+  document.querySelectorAll('.cat[data-blinks="true"]').forEach((c) => { c.classList.add('blinking'); setTimeout(() => c.classList.remove('blinking'), 170); });
+}, 3800);
 
 /* ================= boot ================= */
 async function boot() {
@@ -244,7 +230,8 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ================= shell ================= */
-const mapOpen = () => S.me.who === 'jaa' || (S.settings.map_unlock && TODAY >= S.settings.map_unlock);
+const unlockDay = () => S.drops.find((d) => d.kind === 'unlock' && d.show_on)?.show_on || S.settings.map_unlock;
+const mapOpen = () => S.me.who === 'jaa' || (!!unlockDay() && TODAY >= unlockDay());
 
 function renderApp() {
   if (S.tab === 'bangkok' && !mapOpen()) S.tab = 'today';
@@ -424,15 +411,71 @@ function dropCardHTML(sp) {
     <div class="nick-block">${nick}</div>
     ${treat ? `<p class="treat-label">${S.me.who === 'kc' ? 'Today’s treat, now in your wallet' : `Today’s treat for ${esc(name('kc'))}`}</p><div class="granted">${voucherCardHTML({ ...treat, issued_by: 'jaa' })}</div>` : ''}</div>`;
 }
+const MOODS = [
+  [0, 'A fresh start. He’s already eyeing the next one.'],
+  [10, 'He’s strolling, not rushing.'],
+  [30, 'Almost halfway. He noticed, he’s just not saying.'],
+  [50, 'Past halfway. He’s trying very hard to look unbothered.'],
+  [70, 'He can smell the reward from here.'],
+  [90, 'Right at the door. Don’t keep him waiting.'],
+];
+const moodFor = (into) => MOODS.filter(([m]) => into >= m).pop()[1];
+const idleFace = (into) => (into >= 90 ? 'excited' : into >= 50 ? 'smug' : 'sassy');
+const leftText = (into) => `<b>${XP.perReward - into} XP</b> to ${S.me.who === 'kc' ? 'your' : 'her'} next reward`;
 function xpHTML() {
-  const total = xpTotal(), into = total % XP.perReward, left = XP.perReward - into;
-  const mine = S.me.who === 'kc';
-  return `<div class="section-head"><h2>${mine ? 'Your XP' : `${esc(name('kc'))}’s XP`}</h2></div>
-    <div class="xp" id="xp">
-      <div class="xp-row"><b id="xp-total">${total}</b><span>XP</span></div>
-      <div class="xp-bar" role="progressbar" aria-valuemin="0" aria-valuemax="${XP.perReward}" aria-valuenow="${into}"><i style="width:${into}%"></i></div>
-      <p>${left} XP to ${mine ? 'your' : 'her'} next reward. ${mine ? 'You earn' : 'She earns'} ${XP.daily} a day, and ${XP.special} on special days.</p>
+  const total = xpTotal(), into = total % XP.perReward;
+  return `<div class="section-head"><h2>${S.me.who === 'kc' ? 'Your XP' : `${esc(name('kc'))}’s XP`}</h2></div>
+    <div class="xp" id="xp" style="--p:${into}">
+      <div class="xp-top"><div class="xp-row"><b id="xp-total">${total}</b><span>XP</span></div><p class="xp-mood" id="xp-mood">${moodFor(into)}</p></div>
+      <div class="xp-track" id="xp-track">
+        <div class="xp-bar" role="progressbar" aria-valuemin="0" aria-valuemax="${XP.perReward}" aria-valuenow="${into}"><i></i></div>
+        <div class="xp-gift">${giftSVG()}</div>
+        <button class="xp-cat" id="xp-cat" type="button" aria-label="Boop the cat">${catSVG(idleFace(into))}</button>
+      </div>
+      <p class="xp-left" id="xp-left">${leftText(into)}</p>
     </div>`;
+}
+// Swap the cat's face for a while, then let him settle back to his resting face.
+function setCat(expr, ms = 0, move = '') {
+  const el = $('#xp-cat'); if (!el) return;
+  el.innerHTML = catSVG(expr);
+  if (move) { el.classList.remove('hop', 'boop'); void el.offsetWidth; el.classList.add(move); }
+  clearTimeout(setCat.t);
+  if (ms) setCat.t = setTimeout(() => { const box = $('#xp'); const into = Number(box?.style.getPropertyValue('--p')) || 0; setCat(idleFace(into)); }, ms);
+}
+function sparkle(track, x) {
+  for (let i = 0; i < 9; i++) {
+    const d = document.createElement('i'); d.className = 'xp-burst';
+    const a = (Math.PI * (0.15 + 0.7 * (i / 8))) , r = 34 + Math.random() * 22;
+    d.style.cssText = `--x:${x}px;--dx:${Math.cos(a) * r * (i % 2 ? 1 : -1)}px;--dy:${-Math.sin(a) * r}px;--c:${i % 3 ? '#f0f0ee' : '#a98ff0'}`;
+    track.appendChild(d); setTimeout(() => d.remove(), 1000);
+  }
+}
+function animateGain(from, to) {
+  const box = $('#xp'), track = $('#xp-track'); if (!box || !track) return;
+  box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  const fromInto = from % XP.perReward, toInto = to % XP.perReward;
+  const wrapped = Math.floor(to / XP.perReward) > Math.floor(from / XP.perReward);
+  setTimeout(() => {
+    const num = $('#xp-total'), t0 = performance.now();
+    const step = (t) => { const k = Math.min(1, (t - t0) / 1100); num.textContent = Math.round(from + (to - from) * (1 - (1 - k) ** 3)); if (k < 1) requestAnimationFrame(step); };
+    requestAnimationFrame(step);
+    if (wrapped) {
+      box.style.setProperty('--p', 100);
+      setTimeout(() => { box.classList.add('no-anim'); box.style.setProperty('--p', 0); void box.offsetWidth; box.classList.remove('no-anim'); box.style.setProperty('--p', toInto); }, 1450);
+    } else box.style.setProperty('--p', toInto);
+    const tick = wrapped || Math.floor(toInto / 10) > Math.floor(fromInto / 10);
+    setCat(tick ? 'excited' : 'happy', 3200, 'hop');
+    navigator.vibrate?.([14, 50, 22]);
+    setTimeout(() => {
+      const cat = $('#xp-cat'); if (!cat) return;
+      const x = cat.getBoundingClientRect().left + cat.offsetWidth / 2 - track.getBoundingClientRect().left;
+      sparkle(track, x);
+      const pop = document.createElement('span'); pop.className = 'xp-pop'; pop.textContent = `+${to - from} XP`;
+      pop.style.setProperty('--x', x + 'px'); track.appendChild(pop); setTimeout(() => pop.remove(), 2300);
+      $('#xp-mood').textContent = moodFor(toInto); $('#xp-left').innerHTML = leftText(toInto);
+    }, 900);
+  }, 700);
 }
 function toDeliverHTML() {
   if (S.me.who !== 'jaa') return '';
@@ -454,7 +497,16 @@ function viewToday() {
     ${xpHTML()}
     ${upcoming.length ? `<details class="peek"><summary>Coming up (only you see this)</summary><ol>
       ${upcoming.map(([day, s]) => `<li><span>${fmt(day, { month: 'short', day: 'numeric' })}</span><span>${s ? `<b>${esc(s.pinned ? s.pinned.title : `Happy ${milestoneName(s.monthsary)}`)}</b>, +${XP.special} XP and a treat` : esc(nickname(day))}</span></li>`).join('')}
-    </ol></details>` : ''}`;
+    </ol></details>` : ''}
+    ${specialDaysHTML()}`;
+
+  $('#xp-cat')?.addEventListener('click', () => {
+    const into = Number($('#xp')?.style.getPropertyValue('--p')) || 0, rest = idleFace(into);
+    const pick = EXPRESSIONS.filter((e) => e !== rest && e !== $('#xp-cat .cat')?.dataset.expr);
+    setCat(pick[Math.floor(Math.random() * pick.length)], 1900, 'boop'); thump(false);
+  });
+  $('#add-day')?.addEventListener('click', () => dayForm());
+  $('#days')?.addEventListener('click', (e) => { const id = e.target.closest('[data-day]')?.dataset.day; if (id) dayForm(S.drops.find((d) => d.id === Number(id))); });
 
   $('#deliver')?.addEventListener('click', async (e) => {
     const b = e.target.closest('[data-deliver]'); if (!b) return;
@@ -471,6 +523,7 @@ function viewToday() {
     S.openedLocal = TODAY;
     const isKC = S.me.who === 'kc';
     let gained = 0, unlocked = [];
+    const before = xpTotal();
     if (!PREVIEW) {
       try {
         await S.be.markOpen(TODAY, S.me.who);
@@ -479,14 +532,8 @@ function viewToday() {
     }
     setTimeout(() => {
       $('#stage').innerHTML = dropCardHTML(sp);
-      if (gained) {
-        const pop = document.createElement('span'); pop.className = 'xp-pop'; pop.textContent = `+${gained} XP`;
-        $('#stage').appendChild(pop);
-        const fresh = document.createElement('div'); fresh.innerHTML = xpHTML();
-        $('#xp')?.replaceWith(fresh.querySelector('#xp'));
-        renderNavBadges();
-      }
-      if (unlocked.length) setTimeout(() => rewardSheet(unlocked), 1300);
+      if (gained) { animateGain(before, xpTotal()); renderNavBadges(); }
+      if (unlocked.length) setTimeout(() => rewardSheet(unlocked), 3600);
     }, 1450);
   };
 }
@@ -518,11 +565,65 @@ async function awardDrop(sp) {
 function rewardSheet(list) {
   const r = list[list.length - 1];
   thump(true);
-  openSheet(`<h2>${r.xp} XP</h2><p class="lead">You unlocked a reward. It’s already in your wallet, so use it whenever you want. No asking needed.</p>
+  openSheet(`<div class="sheet-cat">${catSVG('love')}</div><h2>${r.xp} XP</h2><p class="lead">You unlocked a reward. It’s already in your wallet, so use it whenever you want. No asking needed.</p>
     <div class="granted" style="margin:0 0 22px">${voucherCardHTML({ ...r, issued_by: 'jaa' })}</div>
     <div class="row"><button class="btn" data-go>See my wallet</button></div><div class="row"><button class="btn quiet" data-close>Later</button></div>`, (b) => {
     b.querySelector('[data-close]').onclick = closeSheet;
     b.querySelector('[data-go]').onclick = () => { closeSheet(); S.tab = 'wallet'; renderApp(); };
+  });
+}
+function specialDaysHTML() {
+  if (S.me.who !== 'jaa') return '';
+  const ahead = S.drops.filter((d) => d.show_on && d.show_on >= TODAY).sort((a, b) => a.show_on.localeCompare(b.show_on));
+  const when = (day) => fmt(day, { month: 'short', day: 'numeric', ...(day.slice(0, 4) !== TODAY.slice(0, 4) ? { year: 'numeric' } : {}) });
+  return `<div class="section-head"><h2>Special days</h2><button class="btn line small" id="add-day">Add a day</button></div>
+    ${ahead.length ? `<ul class="days" id="days">${ahead.map((d) => `<li><button type="button" data-day="${d.id}"><time>${when(d.show_on)}</time><span><b>${esc(d.title)}</b><small>${d.voucher_title ? esc(d.voucher_title) : 'a surprise from the treat list'}${d.kind === 'unlock' ? ', opens Bangkok for her' : ''}</small></span></button></li>`).join('')}</ul>`
+      : '<p class="empty">No special days coming up. Add one for your next trip or date.</p>'}
+    <p class="note-small">Monthsaries on the 1st happen on their own. Every special day gives ${esc(name('kc'))} +${XP.special} XP and a treat.</p>`;
+}
+function dayForm(d) {
+  const editing = !!d;
+  let mode = d?.voucher_title ? 'own' : 'list', tier = d?.voucher_tier || 'orchid';
+  const tiers = [['black', 'Matte black'], ['chrome', 'Chrome'], ['orchid', 'Purple']];
+  openSheet(`<h2>${editing ? 'Edit special day' : 'Add a special day'}</h2>
+    <p class="lead">${esc(name('kc'))} gets +${XP.special} XP and a treat when she opens that day’s drop. She won’t know it’s coming.</p>
+    <form id="df">
+      <label class="field"><span>Date</span><input type="date" name="date" required value="${esc(d?.show_on || '')}" min="${TODAY}"></label>
+      <label class="field"><span>What’s the day</span><input name="title" required maxlength="60" placeholder="Travel day" value="${esc(d?.title || '')}"></label>
+      <label class="field"><span>Message for her (optional)</span><textarea name="body" maxlength="400" placeholder="Shows on her drop, above her nickname">${esc(d?.body || '')}</textarea></label>
+      <div class="field"><span>Her treat</span><div class="seg" id="mode">
+        <button type="button" data-m="list" aria-pressed="${mode === 'list'}">Surprise from the treat list</button>
+        <button type="button" data-m="own" aria-pressed="${mode === 'own'}">Write my own</button></div></div>
+      <div class="stack-y" id="own" ${mode === 'own' ? '' : 'hidden'}>
+        <label class="field"><span>What it’s for</span><input name="vt" maxlength="40" placeholder="1 airport snack run" value="${esc(d?.voucher_title || '')}"></label>
+        <label class="field"><span>Fine print</span><input name="vs" maxlength="70" placeholder="anything you want at the gate" value="${esc(d?.voucher_sub || '')}"></label>
+        <div class="field"><span>Card</span><div class="seg" id="tier">${tiers.map(([k, l]) => `<button type="button" data-t="${k}" aria-pressed="${tier === k}">${l}</button>`).join('')}</div></div>
+      </div>
+      ${d?.kind === 'unlock' ? '<p class="muted small" style="margin:0">This day also opens the Bangkok tab for her, so moving it moves that too.</p>' : ''}
+      <button class="btn" type="submit">${editing ? 'Save' : 'Add special day'}</button>
+      ${editing ? '<button class="btn danger" type="button" id="del">Delete</button>' : ''}
+    </form>`, (b) => {
+    const own = b.querySelector('#own');
+    b.querySelector('#mode').onclick = (e) => { const m = e.target.closest('button')?.dataset.m; if (!m) return; mode = m; [...e.currentTarget.children].forEach((x) => x.setAttribute('aria-pressed', x.dataset.m === m)); own.hidden = m !== 'own'; };
+    b.querySelector('#tier').onclick = (e) => { const t = e.target.closest('button')?.dataset.t; if (!t) return; tier = t; [...e.currentTarget.children].forEach((x) => x.setAttribute('aria-pressed', x.dataset.t === t)); };
+    b.querySelector('#df').onsubmit = async (e) => {
+      e.preventDefault();
+      const f = new FormData(e.target), day = f.get('date'), vt = f.get('vt').trim();
+      if (day < TODAY) return toast('Pick today or a later date');
+      if (S.drops.some((x) => x.show_on === day && x.id !== d?.id)) return toast(`${fmt(day, { month: 'short', day: 'numeric' })} is already a special day. Edit that one instead.`);
+      if (mode === 'own' && !vt) return toast('Give her treat a name, or pick the treat list');
+      const row = { show_on: day, title: f.get('title').trim(), body: f.get('body').trim() || null,
+        voucher_title: mode === 'own' ? vt : null, voucher_sub: mode === 'own' ? (f.get('vs').trim() || null) : null, voucher_tier: mode === 'own' ? tier : null };
+      try {
+        if (editing) await S.be.updateDrop(d.id, row); else await S.be.addDrop({ ...row, kind: 'note' });
+        S.drops = await S.be.drops(); closeSheet(); viewToday(); toast(editing ? 'Saved' : 'Special day added');
+      } catch { toast('Didn’t save. Try again.'); }
+    };
+    const del = b.querySelector('#del');
+    if (del) del.onclick = async () => {
+      if (!del.dataset.sure) { del.dataset.sure = '1'; del.textContent = 'Tap again to delete'; return; }
+      try { await S.be.deleteDrop(d.id); S.drops = await S.be.drops(); closeSheet(); viewToday(); toast('Deleted'); } catch { toast('Didn’t delete. Try again.'); }
+    };
   });
 }
 function renderNavBadges() {
@@ -805,17 +906,14 @@ function placeForm(p) {
 
 /* ================= settings ================= */
 function openSettings() {
-  const soundOn = localStorage.getItem('ziggy-sound') !== 'off';
   openSheet(`<h2>Settings</h2><p class="lead">Signed in as ${esc(S.me.display)}.</p>
     <div class="stack-y">
       <button class="btn line" id="s-code">Change code</button>
-      <button class="btn line" id="s-sound">Sound: ${soundOn ? 'on' : 'off'}</button>
       <button class="btn line" id="s-backup">Download a backup</button>
       ${S.be.demo ? `<button class="btn line" id="s-as">Demo: view as ${S.me.who === 'jaa' ? esc(name('kc')) : esc(name('jaa'))}</button>` : ''}
       <button class="btn danger" id="s-out">Sign out</button>
     </div>`, (b) => {
     b.querySelector('#s-code').onclick = () => { closeSheet(); renderSetPin(true); };
-    b.querySelector('#s-sound').onclick = (e) => { const on = localStorage.getItem('ziggy-sound') === 'off'; localStorage.setItem('ziggy-sound', on ? 'on' : 'off'); e.target.textContent = `Sound: ${on ? 'on' : 'off'}`; if (on) thump(false); };
     b.querySelector('#s-backup').onclick = () => {
       const data = { exported: new Date().toISOString(), timeline: S.timeline, places: S.places, vouchers: S.vouchers, xp: S.xp };
       const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));

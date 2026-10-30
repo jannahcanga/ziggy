@@ -1,5 +1,5 @@
-const CACHE = 'ziggy-v3';
-const SHELL = ['./', './index.html', './styles.css', './app.js', './backend.js', './config.js', './manifest.webmanifest', './icons/icon-192.png', './brand/tulip-chalk-transparent.png'];
+const CACHE = 'ziggy-v4';
+const SHELL = ['./', './index.html', './styles.css', './app.js', './cat.js', './backend.js', './config.js', './manifest.webmanifest', './icons/icon-192.png', './brand/tulip-chalk-transparent.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => {
   e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim()));
