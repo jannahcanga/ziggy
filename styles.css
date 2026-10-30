@@ -382,3 +382,99 @@ details.peek li b { font-weight: 400; color: var(--chalk); }
 @keyframes tail { 0%, 100% { transform: rotate(-7deg); } 50% { transform: rotate(9deg); } }
 @keyframes breathe { 0%, 100% { transform: scale(1, 1); } 50% { transform: scale(1.012, 1.028); } }
 @keyframes floaty { 50% { transform: translateY(-2.5px); } }
+
+/* ---------- update 5: no scroll bars, calmer sheets, Today fits on one screen ---------- */
+html, body { height: 100%; overflow: hidden; }
+/* The page scrolls inside #scroller, which is 30px wider than the screen, so the scroll bar sits off-screen. */
+#scroller { position: fixed; top: 0; bottom: 0; left: 0; right: -30px; padding-right: 30px; overflow-y: auto; overflow-x: hidden;
+  overscroll-behavior-y: contain; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+#scroller::-webkit-scrollbar, .sheet-scroll::-webkit-scrollbar, .chips::-webkit-scrollbar { display: none; width: 0; height: 0; }
+#scroller.locked { overflow: hidden; }
+
+.sheet { bottom: var(--kb, 0px); padding: 0; overflow: hidden; touch-action: pan-y;
+  --sheet-max: min(90dvh, calc(var(--vvh, 100dvh) - 20px)); max-height: var(--sheet-max);
+  transition: transform .32s var(--ease), bottom .25s var(--ease); }
+.sheet.closing { transform: translateY(105%); }
+.backdrop.closing { opacity: 0; transition: opacity .26s; }
+.grab-zone { padding: 12px 0 10px; cursor: grab; }
+.sheet .grab { margin: 0 auto; }
+.sheet-scroll { max-height: calc(var(--sheet-max) - 26px); overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; touch-action: pan-y;
+  margin-right: -30px; padding: 8px 54px calc(var(--safe-b) + 28px) 24px; scrollbar-width: none; }
+.sheet-body { min-width: 0; }
+.sheet-body * { max-width: 100%; }
+.field input, .field textarea, .field select { min-width: 0; }
+.field input[type="date"] { -webkit-appearance: none; appearance: none; display: block; min-height: 50px; line-height: 1.3; text-align: left; }
+.field input[type="date"]::-webkit-date-and-time-value { text-align: left; }
+
+/* Today: tighter so the XP bar is visible without scrolling */
+.together { margin-top: 10px; gap: 6px; }
+.tg-face { min-height: 36px; }
+.tg-face b { font-size: 25px; }
+.tg-face.big b { font-size: 36px; }
+.today-date { margin-top: 18px; }
+.stage { min-height: 0; margin: 10px 0 0; }
+.drum { width: min(54vw, 200px); gap: 0; }
+.drum .label { margin-top: 2px; }
+.drum .label b { font-size: 18px; }
+.drop { padding: 22px 22px 22px; border-radius: 24px; }
+.drop .kind { margin-bottom: 14px; }
+.drop h3 { font-size: 27px; margin-bottom: 10px; }
+.drop p.body { font-size: 19px; }
+.drop .stack { font-size: 25px; line-height: 1.16; }
+.drop .nick-block { margin-top: 16px; padding-top: 14px; }
+.drop .nick-block .stack { font-size: 21px; }
+.drop p.extra { font-size: 14px; }
+.treat-label { margin: 16px 0 8px; }
+.mini-v { display: grid; gap: 2px; padding: 12px 14px; border-radius: 14px; background: linear-gradient(160deg, #1c1c1c, #070707); box-shadow: inset 0 1px 0 rgba(255,255,255,.12), inset 0 0 0 1px rgba(255,255,255,.07); }
+.mini-v b { font-weight: 400; font-size: 15px; }
+.mini-v span { font-family: var(--serif); font-style: italic; font-size: 16px; color: var(--mist); }
+.mini-v.orchid { background: radial-gradient(110% 120% at 90% 0%, rgba(169,143,240,.45), transparent 60%), linear-gradient(170deg, #17131f, #050407); }
+.mini-v.chrome { color: #0c0c0c; background: linear-gradient(175deg, #fbfbfa, #b9b9b7); }
+.mini-v.chrome span { color: #333; }
+.xp-head-tight { margin-top: 26px !important; }
+.xp-row b { font-size: 38px; }
+
+/* ---------- manage (baby Jaa) ---------- */
+.back { all: unset; cursor: pointer; font-size: 14px; color: var(--mist); margin-top: 22px; display: inline-flex; align-items: center; gap: 8px; }
+.back::before { content: ''; width: 8px; height: 8px; border-left: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg); }
+.back:focus-visible { outline: 1px solid var(--orchid); outline-offset: 4px; }
+.m-title { font-weight: 300; font-size: 30px; letter-spacing: -.03em; margin: 16px 0 0; }
+.m-sub { display: flex; align-items: baseline; gap: 8px; font-size: 13px; font-weight: 400; color: var(--chalk); margin: 22px 0 10px; }
+.m-sub span { color: var(--smoke); font-size: 12px; }
+.nick-try { display: grid; gap: 12px; justify-items: start; padding: 18px; border-radius: 20px; background: var(--glass-bg); box-shadow: var(--glass-edge); }
+.nick-try .stack { font-family: var(--serif); font-style: italic; font-size: 22px; line-height: 1.2; margin: 0; }
+.nick-try .stack.pop { animation: enter .5s var(--ease); }
+.wchips { display: flex; flex-wrap: wrap; gap: 7px; }
+.wchip { all: unset; cursor: pointer; font-size: 13.5px; padding: 6px 12px; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--hair-strong); color: var(--chalk); transition: background .2s; }
+.wchip:active { background: rgba(255,255,255,.1); }
+.wchip:focus-visible { outline: 1px solid var(--orchid); outline-offset: 2px; }
+.addrow, .bonus { display: flex; gap: 8px; margin-top: 12px; }
+.addrow input, .bonus input { flex: 1; min-width: 0; border: 0; border-radius: 12px; padding: 11px 13px; font-size: 16px; font-weight: 300; background: var(--glass-bg); box-shadow: var(--glass-edge); }
+.bonus input[name="amount"] { flex: 0 0 70px; text-align: center; }
+.mlist { list-style: none; margin: 0; padding: 0; counter-reset: m; }
+.mlist li { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--hair); }
+.mlist li > button, .mlist li > div { all: unset; box-sizing: border-box; flex: 1; min-width: 0; padding: 12px 0; cursor: pointer; }
+.mlist li > div { cursor: default; }
+.mlist b { display: block; font-weight: 400; }
+.mlist small { display: block; color: var(--smoke); font-size: 12.5px; margin-top: 1px; }
+.mlist.num li { counter-increment: m; }
+.mlist.num li::before { content: counter(m); width: 22px; flex: none; font-size: 12px; color: var(--orchid); }
+.mlist li.muted { border: 0; padding: 10px 0; }
+/* update 5 trims */
+.xp-head-tight { margin-top: 20px !important; }
+.xp-track { height: 100px; margin-top: -10px; }
+.xp-pop { bottom: 60px; }
+.xp-pop.to-right { transform: translateX(0); left: var(--x); }
+.xp-pop.to-left { transform: translateX(-100%); left: var(--x); }
+@keyframes xpUpR { 0% { opacity: 0; transform: translate(0, 12px); } 20% { opacity: 1; transform: translate(0, 0); } 75% { opacity: 1; } 100% { opacity: 0; transform: translate(0, -22px); } }
+@keyframes xpUpL { 0% { opacity: 0; transform: translate(-100%, 12px); } 20% { opacity: 1; transform: translate(-100%, 0); } 75% { opacity: 1; } 100% { opacity: 0; transform: translate(-100%, -22px); } }
+.xp-pop.to-right { animation-name: xpUpR; }
+.xp-pop.to-left { animation-name: xpUpL; }
+.drop.special h3 { font-size: 24px; }
+.drop.special p.body { font-size: 17px; line-height: 1.3; }
+.drop.special .nick-block { margin-top: 12px; padding-top: 12px; }
+.drop.special .nick-block .extra { margin-bottom: 6px !important; font-size: 13px; }
+.drop.special .nick-block .stack { font-size: 19px; }
+.treat-label { margin: 12px 0 6px; }
+.mini-v { padding: 10px 13px; }
+.mini-v span { font-size: 14.5px; }

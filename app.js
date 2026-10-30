@@ -44,16 +44,54 @@ function toast(msg) {
   const t = $('#toast'); t.textContent = msg; t.classList.add('toast-show');
   clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('toast-show'), 2400);
 }
+const scroller = () => document.getElementById('scroller');
 function openSheet(html, onMount) {
   const root = $('#sheet-root');
-  root.innerHTML = `<div class="backdrop"></div><div class="sheet" role="dialog" aria-modal="true"><div class="grab"></div><div class="sheet-body">${html}</div></div>`;
+  root.innerHTML = `<div class="backdrop"></div><div class="sheet" role="dialog" aria-modal="true"><div class="grab-zone"><div class="grab"></div></div><div class="sheet-scroll"><div class="sheet-body">${html}</div></div></div>`;
   $('.backdrop', root).onclick = closeSheet;
-  const body = $('.sheet-body', root);
+  scroller()?.classList.add('locked');
+  const sheet = $('.sheet', root), body = $('.sheet-body', root);
+  dragToClose(sheet);
+  body.addEventListener('focusin', (e) => { if (e.target.matches('input, textarea, select')) setTimeout(() => e.target.scrollIntoView({ block: 'center', behavior: 'smooth' }), 320); });
   onMount?.(body);
   setTimeout(() => body.querySelector('[autofocus]')?.focus(), 250);
   return body;
 }
-function closeSheet() { $('#sheet-root').innerHTML = ''; }
+function closeSheet() {
+  const root = $('#sheet-root'), sheet = $('.sheet', root);
+  if (!sheet) return;
+  document.activeElement?.blur?.();
+  sheet.classList.add('closing'); $('.backdrop', root)?.classList.add('closing');
+  setTimeout(() => { if (root.contains(sheet)) { root.innerHTML = ''; scroller()?.classList.remove('locked'); } }, 260);
+}
+// Pull the sheet down from the top to close it, like a native sheet.
+function dragToClose(sheet) {
+  const sc = $('.sheet-scroll', sheet);
+  let y0 = null, dy = 0;
+  sheet.addEventListener('touchstart', (e) => { y0 = (sc.scrollTop <= 0 || e.target.closest('.grab-zone')) ? e.touches[0].clientY : null; dy = 0; }, { passive: true });
+  sheet.addEventListener('touchmove', (e) => {
+    if (y0 === null) return;
+    dy = e.touches[0].clientY - y0;
+    if (dy <= 0) { sheet.style.transform = ''; return; }
+    e.preventDefault();
+    sheet.style.transition = 'none'; sheet.style.transform = `translateY(${dy}px)`;
+  }, { passive: false });
+  sheet.addEventListener('touchend', () => {
+    if (y0 === null) return;
+    sheet.style.transition = ''; y0 = null;
+    if (dy > 110) closeSheet(); else sheet.style.transform = '';
+  });
+}
+// Keep sheets sitting just above the keyboard instead of letting the page jump around.
+function fitViewport() {
+  const vv = window.visualViewport; if (!vv) return;
+  const r = document.documentElement.style;
+  r.setProperty('--kb', Math.max(0, window.innerHeight - vv.height - vv.offsetTop) + 'px');
+  r.setProperty('--vvh', vv.height + 'px');
+  if (vv.offsetTop > 0 && sheetOpen()) window.scrollTo(0, 0);
+}
+window.visualViewport?.addEventListener('resize', fitViewport);
+window.visualViewport?.addEventListener('scroll', fitViewport);
 const sheetOpen = () => !!$('#sheet-root').firstChild;
 
 /* ================= heads-up for baby Jaa ================= */
@@ -218,6 +256,7 @@ async function unlock() {
   try { await loadAll(); } catch (e) { return renderMessage('Couldn’t load', e.message); }
   S.unlocked = true;
   renderApp();
+  if (S.me.who === 'kc' && !PREVIEW) grantLevels().then((u) => { if (u.length) setTimeout(() => rewardSheet(u), 3800); }).catch(() => {});
 }
 async function refresh() {
   try { await loadAll(); if (!sheetOpen()) { S.calm = true; renderApp(); } } catch {}
@@ -235,6 +274,7 @@ const mapOpen = () => S.me.who === 'jaa' || (!!unlockDay() && TODAY >= unlockDay
 
 function renderApp() {
   if (S.tab === 'bangkok' && !mapOpen()) S.tab = 'today';
+  if (S.tab === 'manage' && S.me.who !== 'jaa') S.tab = 'today';
   const seenWallet = Number(localStorage.getItem('ziggy-wallet-seen-' + S.me.who) || 0);
   const walletNew = S.vouchers.some((v) => !v.redeemed_at && v.id > seenWallet);
   const mapNew = !localStorage.getItem('ziggy-map-seen-' + S.me.who);
@@ -253,10 +293,10 @@ function renderApp() {
   <nav class="nav" aria-label="Sections">
     ${tabs.map(([k, l, isNew]) => `<button data-tab="${k}" class="${isNew && S.tab !== k ? 'new' : ''}" ${S.tab === k ? 'aria-current="page"' : ''}>${l}</button>`).join('')}
   </nav>`;
-  $('.nav').onclick = (e) => { const t = e.target.closest('button')?.dataset.tab; if (t && t !== S.tab) { S.tab = t; thump(false); renderApp(); window.scrollTo(0, 0); } };
+  $('.nav').onclick = (e) => { const t = e.target.closest('button')?.dataset.tab; if (t && t !== S.tab) { S.tab = t; thump(false); renderApp(); scroller()?.scrollTo(0, 0); } };
   $('#settings').onclick = openSettings;
   bindCounter();
-  ({ today: viewToday, wallet: viewWallet, us: viewUs, bangkok: viewBangkok })[S.tab]();
+  ({ today: viewToday, wallet: viewWallet, us: viewUs, bangkok: viewBangkok, manage: viewManage })[S.tab]();
   if (!S.calm) $('#view').classList.add('enter');
   S.calm = false;
 }
@@ -400,16 +440,16 @@ function dropCardHTML(sp) {
   const nick = `<p class="extra" style="margin:0 0 10px">Today you are officially</p><p class="stack">${esc(nickname(TODAY))}</p>`;
   if (!sp) return `<div class="drop"><p class="kind">Nickname of the day</p>${nick}</div>`;
   const p = sp.pinned;
-  const label = sp.monthsary && !p ? 'A special day' : 'A special drop';
+  const label = sp.monthsary && !p ? 'A special day' : sp.monthsary ? `A special drop, on our ${milestoneName(sp.monthsary)}` : 'A special drop';
   const title = p ? p.title : `Happy ${milestoneName(sp.monthsary)}`;
   const body = p ? p.body : sp.monthsary % 12 === 0
     ? `${sp.monthsary / 12} ${plural(sp.monthsary / 12, 'year')} since we made it official. JK forever and ever.`
     : `${sp.monthsary} months since we made it official. Still choosing you, every single day.`;
-  const also = p && sp.monthsary ? `<p class="extra">It’s also our ${milestoneName(sp.monthsary)}.</p>` : '';
+  const also = '';
   const treat = treatFor(sp);
   return `<div class="drop special"><p class="kind">${label}</p><h3>${esc(title)}</h3>${body ? `<p class="body">${esc(body)}</p>` : ''}${also}
     <div class="nick-block">${nick}</div>
-    ${treat ? `<p class="treat-label">${S.me.who === 'kc' ? 'Today’s treat, now in your wallet' : `Today’s treat for ${esc(name('kc'))}`}</p><div class="granted">${voucherCardHTML({ ...treat, issued_by: 'jaa' })}</div>` : ''}</div>`;
+    ${treat ? `<p class="treat-label">${S.me.who === 'kc' ? 'Today’s treat, now in your wallet' : `Today’s treat for ${esc(name('kc'))}`}</p><div class="mini-v ${['chrome', 'orchid'].includes(treat.tier) ? treat.tier : ''}"><b>${esc(treat.title)}</b>${treat.sub ? `<span>${esc(treat.sub)}</span>` : ''}</div>` : ''}</div>`;
 }
 const MOODS = [
   [0, 'A fresh start. He’s already eyeing the next one.'],
@@ -422,9 +462,9 @@ const MOODS = [
 const moodFor = (into) => MOODS.filter(([m]) => into >= m).pop()[1];
 const idleFace = (into) => (into >= 90 ? 'excited' : into >= 50 ? 'smug' : 'sassy');
 const leftText = (into) => `<b>${XP.perReward - into} XP</b> to ${S.me.who === 'kc' ? 'your' : 'her'} next reward`;
-function xpHTML() {
-  const total = xpTotal(), into = total % XP.perReward;
-  return `<div class="section-head"><h2>${S.me.who === 'kc' ? 'Your XP' : `${esc(name('kc'))}’s XP`}</h2></div>
+function xpHTML(shown) {
+  const total = shown ?? xpTotal(), into = total % XP.perReward;
+  return `<div class="section-head xp-head-tight"><h2>${S.me.who === 'kc' ? 'Your XP' : `${esc(name('kc'))}’s XP`}</h2></div>
     <div class="xp" id="xp" style="--p:${into}">
       <div class="xp-top"><div class="xp-row"><b id="xp-total">${total}</b><span>XP</span></div><p class="xp-mood" id="xp-mood">${moodFor(into)}</p></div>
       <div class="xp-track" id="xp-track">
@@ -472,10 +512,12 @@ function animateGain(from, to) {
       const x = cat.getBoundingClientRect().left + cat.offsetWidth / 2 - track.getBoundingClientRect().left;
       sparkle(track, x);
       const pop = document.createElement('span'); pop.className = 'xp-pop'; pop.textContent = `+${to - from} XP`;
-      pop.style.setProperty('--x', x + 'px'); track.appendChild(pop); setTimeout(() => pop.remove(), 2300);
+      const right = x < track.offsetWidth * 0.6;
+      pop.style.setProperty('--x', (right ? x + 40 : x - 40) + 'px'); pop.classList.add(right ? 'to-right' : 'to-left'); track.appendChild(pop); setTimeout(() => pop.remove(), 2300);
       $('#xp-mood').textContent = moodFor(toInto); $('#xp-left').innerHTML = leftText(toInto);
     }, 900);
   }, 700);
+  if (S.me.who === 'kc') try { localStorage.setItem('ziggy-xp-seen', String(to)); } catch {}
 }
 function toDeliverHTML() {
   if (S.me.who !== 'jaa') return '';
@@ -490,15 +532,24 @@ function viewToday() {
   const sp = specialFor(TODAY);
   const opened = S.opens.some((o) => o.drop_day === TODAY && o.who === S.me.who) || S.openedLocal === TODAY;
   const upcoming = S.me.who === 'jaa' ? Array.from({ length: 7 }, (_, i) => addDays(TODAY, i + 1)).map((day) => [day, specialFor(day)]) : [];
+  const isKC = S.me.who === 'kc', total = xpTotal();
+  let seen = NaN; try { seen = Number(localStorage.getItem('ziggy-xp-seen') ?? NaN); } catch {}
+  const catchUp = isKC && !PREVIEW && Number.isFinite(seen) && total > seen && !S.animating;
   v.innerHTML = `
     <p class="today-date">${fmt(TODAY, { weekday: 'long', month: 'long', day: 'numeric' })}</p>
     <div class="stage" id="stage">${opened ? dropCardHTML(sp) : drumHTML(sp)}</div>
     ${toDeliverHTML()}
-    ${xpHTML()}
+    ${xpHTML(catchUp ? seen : undefined)}
     ${upcoming.length ? `<details class="peek"><summary>Coming up (only you see this)</summary><ol>
       ${upcoming.map(([day, s]) => `<li><span>${fmt(day, { month: 'short', day: 'numeric' })}</span><span>${s ? `<b>${esc(s.pinned ? s.pinned.title : `Happy ${milestoneName(s.monthsary)}`)}</b>, +${XP.special} XP and a treat` : esc(nickname(day))}</span></li>`).join('')}
     </ol></details>` : ''}
     ${specialDaysHTML()}`;
+
+  if (catchUp) {
+    S.animating = true;
+    const bonus = S.xp.filter((x) => x.ref.startsWith('bonus:')).pop();
+    setTimeout(() => { animateGain(seen, total); S.animating = false; if (bonus) setTimeout(() => toast(`From ${name('jaa')}: ${bonus.reason.replace(/^bonus: ?/, '') || 'bonus XP'}`), 1800); }, 500);
+  } else if (isKC && !PREVIEW) { try { localStorage.setItem('ziggy-xp-seen', String(total)); } catch {} }
 
   $('#xp-cat')?.addEventListener('click', () => {
     const into = Number($('#xp')?.style.getPropertyValue('--p')) || 0, rest = idleFace(into);
@@ -547,10 +598,16 @@ async function awardDrop(sp) {
   const treat = treatFor(sp);
   if (treat) await be.addVoucher({ ...treat, issued_by: 'jaa', source: 'special:' + TODAY });
   S.xp = await be.xp();
-  const unlocked = [];
+  const unlocked = await grantLevels();
+  S.vouchers = await be.vouchers();
+  return { gained, unlocked };
+}
+// Hands out any 100 XP rewards she has reached but not received yet. Safe to call any time.
+async function grantLevels() {
+  const be = S.be, unlocked = [];
   const level = Math.floor(xpTotal() / XP.perReward);
   const prizes = S.rewards.filter((r) => r.kind === 'level').sort((a, b) => a.sort - b.sort);
-  if (prizes.length) {
+  if (prizes.length && level > 0) {
     const have = new Set(S.vouchers.map((v) => v.source));
     for (let L = 1; L <= level; L++) {
       if (have.has('level:' + L)) continue;
@@ -558,9 +615,9 @@ async function awardDrop(sp) {
       const made = await be.addVoucher({ title: r.title, sub: r.sub, tier: r.tier, issued_by: 'jaa', source: 'level:' + L });
       if (made.length) { unlocked.push({ ...r, xp: L * XP.perReward }); notifyJaa('baby KC unlocked a reward', `${L * XP.perReward} XP: ${r.title}`); }
     }
+    if (unlocked.length) S.vouchers = await be.vouchers();
   }
-  S.vouchers = await be.vouchers();
-  return { gained, unlocked };
+  return unlocked;
 }
 function rewardSheet(list) {
   const r = list[list.length - 1];
@@ -904,15 +961,152 @@ function placeForm(p) {
   });
 }
 
+/* ================= manage (baby Jaa only) ================= */
+const TIERS = [['black', 'Matte black'], ['chrome', 'Chrome'], ['orchid', 'Purple']];
+function viewManage() {
+  const v = $('#view');
+  const adj = S.words.filter((w) => w.kind === 'adj').sort((a, b) => a.word.localeCompare(b.word));
+  const noun = S.words.filter((w) => w.kind === 'noun').sort((a, b) => a.word.localeCompare(b.word));
+  const levels = S.rewards.filter((r) => r.kind === 'level').sort((a, b) => a.sort - b.sort);
+  const treats = S.rewards.filter((r) => r.kind === 'special').sort((a, b) => a.sort - b.sort);
+  const nextLevel = Math.floor(xpTotal() / XP.perReward) + 1;
+  const nextPrize = levels.length ? levels[(nextLevel - 1) % levels.length] : null;
+  const unused = S.vouchers.filter((x) => !x.redeemed_at).sort((a, b) => a.id - b.id);
+  const bonuses = S.xp.filter((x) => x.ref.startsWith('bonus:')).slice(-5).reverse();
+  const chips = (list) => list.map((w) => `<button type="button" class="wchip" data-word="${w.id}">${esc(w.word)}</button>`).join('');
+  const row = (attr, id, title, sub) => `<li><button type="button" ${attr}="${id}"><b>${esc(title)}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</button></li>`;
+  v.innerHTML = `
+    <button class="back" id="m-back" type="button">Back</button>
+    <h2 class="m-title">Manage ziggy</h2>
+    <p class="muted small" style="margin:6px 0 0">Changes save right away and show on both phones. Only you can see this.</p>
+
+    <div class="section-head"><h2>Nicknames</h2></div>
+    <div class="nick-try"><p class="stack" id="m-nick">${esc(nickname(addDays(TODAY, Math.floor(Math.random() * 999) + 1)))}</p><button class="btn line small" id="m-shuffle" type="button">Shuffle</button></div>
+    <h3 class="m-sub">Describing words <span>${adj.length}</span></h3>
+    <div class="wchips" id="m-words-adj">${chips(adj)}</div>
+    <form class="addrow" data-kind="adj"><input name="w" maxlength="30" placeholder="Add a describing word" autocomplete="off"><button class="btn small" type="submit">Add</button></form>
+    <h3 class="m-sub">Nicknames <span>${noun.length}</span></h3>
+    <div class="wchips" id="m-words-noun">${chips(noun)}</div>
+    <form class="addrow" data-kind="noun"><input name="w" maxlength="30" placeholder="Add a nickname" autocomplete="off"><button class="btn small" type="submit">Add</button></form>
+    <p class="note-small">Each day mixes 3 or 4 describing words with 1 nickname. Tap a word to edit or remove it.</p>
+
+    <div class="section-head"><h2>Bonus XP</h2></div>
+    <p class="muted small" style="margin:0 0 12px">Give ${esc(name('kc'))} extra XP for anything. Her bar fills up the next time she opens ziggy.</p>
+    <form class="bonus" id="m-bonus"><input name="amount" type="number" inputmode="numeric" min="1" max="100" value="10" aria-label="XP"><input name="reason" maxlength="60" placeholder="What it’s for" autocomplete="off"><button class="btn small" type="submit">Give</button></form>
+    ${bonuses.length ? `<ul class="mlist" id="m-bonuses">${bonuses.map((x) => `<li><div><b>+${x.amount} XP</b><small>${esc(x.reason.replace(/^bonus: ?/, '') || 'bonus')}</small></div><button type="button" class="btn quiet small" data-unbonus="${x.id}">Remove</button></li>`).join('')}</ul>` : ''}
+
+    <div class="section-head"><h2>Rewards every 100 XP</h2><button class="btn line small" type="button" data-addreward="level">Add</button></div>
+    <ol class="mlist num" id="m-level">${levels.map((r) => row('data-reward', r.id, r.title, r.sub)).join('')}</ol>
+    ${nextPrize ? `<p class="note-small">Given in this order, then it starts over. Her next one, at ${nextLevel * XP.perReward} XP: ${esc(nextPrize.title)}.</p>` : ''}
+
+    <div class="section-head"><h2>Special day treats</h2><button class="btn line small" type="button" data-addreward="special">Add</button></div>
+    <ul class="mlist" id="m-special">${treats.map((r) => row('data-reward', r.id, r.title, r.sub)).join('')}</ul>
+    <p class="note-small">Used on monthsaries and special days that don’t have their own treat.</p>
+
+    <div class="section-head"><h2>In her wallet</h2></div>
+    <ul class="mlist" id="m-vouchers">${unused.map((x) => row('data-voucher', x.id, x.title, x.sub)).join('') || '<li class="muted small">Nothing unused right now.</li>'}</ul>
+    <p class="note-small">Special days are on Today. Timeline moments and Bangkok spots are edited right where they are.</p>`;
+
+  $('#m-back').onclick = () => { S.tab = S.back || 'today'; renderApp(); };
+  $('#m-shuffle').onclick = () => { const el = $('#m-nick'); el.classList.remove('pop'); void el.offsetWidth; el.textContent = nickname(addDays(TODAY, Math.floor(Math.random() * 9999) + 1)); el.classList.add('pop'); thump(false); };
+  v.querySelectorAll('.addrow').forEach((f) => f.onsubmit = async (e) => {
+    e.preventDefault();
+    const word = f.w.value.trim().replace(/\s+/g, ' '), kind = f.dataset.kind;
+    if (!word) return;
+    if (S.words.some((w) => w.kind === kind && w.word.toLowerCase() === word.toLowerCase())) return toast(`“${word}” is already there`);
+    try { await S.be.addWord({ kind, word }); S.words = await S.be.words(); viewManage(); toast(`Added “${word}”`); } catch { toast('Didn’t save. Try again.'); }
+  });
+  v.querySelectorAll('.wchips').forEach((c) => c.onclick = (e) => { const id = e.target.closest('[data-word]')?.dataset.word; if (id) wordForm(S.words.find((w) => w.id === Number(id))); });
+  $('#m-bonus').onsubmit = async (e) => {
+    e.preventDefault();
+    const amount = Math.round(Number(e.target.amount.value)), reason = e.target.reason.value.trim();
+    if (!(amount >= 1 && amount <= 100)) return toast('Pick between 1 and 100 XP');
+    try { await S.be.addXp({ who: 'kc', amount, reason: 'bonus: ' + (reason || 'just because'), ref: 'bonus:' + Date.now() }); S.xp = await S.be.xp(); thump(false); viewManage(); toast(`Gave her +${amount} XP`); }
+    catch { toast('Didn’t save. Try again.'); }
+  };
+  $('#m-bonuses')?.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-unbonus]'); if (!b) return;
+    if (!b.dataset.sure) { b.dataset.sure = '1'; b.textContent = 'Tap again'; return; }
+    try { await S.be.deleteXp(Number(b.dataset.unbonus)); S.xp = await S.be.xp(); viewManage(); toast('Removed'); } catch { toast('Didn’t remove. Try again.'); }
+  });
+  v.querySelectorAll('[data-addreward]').forEach((b) => b.onclick = () => rewardForm(null, b.dataset.addreward));
+  ['#m-level', '#m-special'].forEach((sel) => $(sel)?.addEventListener('click', (e) => { const id = e.target.closest('[data-reward]')?.dataset.reward; if (id) rewardForm(S.rewards.find((r) => r.id === Number(id))); }));
+  $('#m-vouchers')?.addEventListener('click', (e) => { const id = e.target.closest('[data-voucher]')?.dataset.voucher; if (id) voucherEdit(S.vouchers.find((x) => x.id === Number(id))); });
+}
+function confirmDelete(btn, run) {
+  btn.onclick = async () => {
+    if (!btn.dataset.sure) { btn.dataset.sure = '1'; btn.textContent = 'Tap again to delete'; return; }
+    try { await run(); } catch { toast('Didn’t delete. Try again.'); }
+  };
+}
+function wordForm(w) {
+  openSheet(`<h2>Edit word</h2><p class="lead">${w.kind === 'adj' ? 'A describing word' : 'A nickname'} in her daily nickname.</p>
+    <form id="wf"><label class="field"><span>Word</span><input name="w" maxlength="30" required value="${esc(w.word)}" autocomplete="off"></label>
+      <button class="btn" type="submit">Save</button><button class="btn danger" type="button" id="del">Remove</button></form>`, (b) => {
+    b.querySelector('#wf').onsubmit = async (e) => {
+      e.preventDefault(); const word = e.target.w.value.trim().replace(/\s+/g, ' ');
+      if (!word) return;
+      try { await S.be.updateWord(w.id, { word }); S.words = await S.be.words(); closeSheet(); viewManage(); toast('Saved'); } catch { toast('Didn’t save. Try again.'); }
+    };
+    confirmDelete(b.querySelector('#del'), async () => { await S.be.deleteWord(w.id); S.words = await S.be.words(); closeSheet(); viewManage(); toast(`Removed “${w.word}”`); });
+  });
+}
+function rewardForm(r, kind = r?.kind) {
+  let tier = r?.tier || 'black';
+  const label = kind === 'level' ? 'reward' : 'treat';
+  openSheet(`<h2>${r ? `Edit ${label}` : `Add a ${label}`}</h2>
+    <p class="lead">${kind === 'level' ? `She gets these in order, 1 for every ${XP.perReward} XP.` : 'Given on monthsaries and special days without their own treat.'}</p>
+    <form id="rf">
+      <label class="field"><span>What it’s for</span><input name="title" maxlength="40" required value="${esc(r?.title || '')}" placeholder="1 matcha" autocomplete="off"></label>
+      <label class="field"><span>Fine print</span><input name="sub" maxlength="70" value="${esc(r?.sub || '')}" placeholder="your milk, my treat" autocomplete="off"></label>
+      <div class="field"><span>Card</span><div class="seg" id="tier">${TIERS.map(([k, l]) => `<button type="button" data-t="${k}" aria-pressed="${tier === k}">${l}</button>`).join('')}</div></div>
+      <button class="btn" type="submit">${r ? 'Save' : 'Add'}</button>
+      ${r ? '<button class="btn danger" type="button" id="del">Delete</button>' : ''}
+    </form>`, (b) => {
+    b.querySelector('#tier').onclick = (e) => { const t = e.target.closest('button')?.dataset.t; if (!t) return; tier = t; [...e.currentTarget.children].forEach((x) => x.setAttribute('aria-pressed', x.dataset.t === t)); };
+    b.querySelector('#rf').onsubmit = async (e) => {
+      e.preventDefault();
+      const row = { title: e.target.title.value.trim(), sub: e.target.sub.value.trim() || null, tier };
+      try {
+        if (r) await S.be.updateReward(r.id, row);
+        else await S.be.addReward({ ...row, kind, sort: Math.max(0, ...S.rewards.filter((x) => x.kind === kind).map((x) => x.sort)) + 1 });
+        S.rewards = await S.be.rewards(); closeSheet(); viewManage(); toast(r ? 'Saved' : 'Added');
+      } catch { toast('Didn’t save. Try again.'); }
+    };
+    const del = b.querySelector('#del');
+    if (del) confirmDelete(del, async () => { await S.be.deleteReward(r.id); S.rewards = await S.be.rewards(); closeSheet(); viewManage(); toast('Deleted'); });
+  });
+}
+function voucherEdit(x) {
+  let tier = x.tier || 'black';
+  openSheet(`<h2>Edit voucher</h2><p class="lead">It’s unused, in ${esc(name('kc'))}’s wallet.</p>
+    <form id="xf">
+      <label class="field"><span>What it’s for</span><input name="title" maxlength="40" required value="${esc(x.title)}" autocomplete="off"></label>
+      <label class="field"><span>Fine print</span><input name="sub" maxlength="70" value="${esc(x.sub || '')}" autocomplete="off"></label>
+      <div class="field"><span>Card</span><div class="seg" id="tier">${TIERS.map(([k, l]) => `<button type="button" data-t="${k}" aria-pressed="${tier === k}">${l}</button>`).join('')}</div></div>
+      <button class="btn" type="submit">Save</button><button class="btn danger" type="button" id="del">Remove from her wallet</button>
+    </form>`, (b) => {
+    b.querySelector('#tier').onclick = (e) => { const t = e.target.closest('button')?.dataset.t; if (!t) return; tier = t; [...e.currentTarget.children].forEach((y) => y.setAttribute('aria-pressed', y.dataset.t === t)); };
+    b.querySelector('#xf').onsubmit = async (e) => {
+      e.preventDefault();
+      try { await S.be.updateVoucher(x.id, { title: e.target.title.value.trim(), sub: e.target.sub.value.trim() || null, tier }); S.vouchers = await S.be.vouchers(); closeSheet(); viewManage(); toast('Saved'); }
+      catch { toast('Didn’t save. Try again.'); }
+    };
+    confirmDelete(b.querySelector('#del'), async () => { await S.be.deleteVoucher(x.id); S.vouchers = await S.be.vouchers(); closeSheet(); viewManage(); toast('Removed'); });
+  });
+}
+
 /* ================= settings ================= */
 function openSettings() {
   openSheet(`<h2>Settings</h2><p class="lead">Signed in as ${esc(S.me.display)}.</p>
     <div class="stack-y">
+      ${S.me.who === 'jaa' ? '<button class="btn" id="s-manage">Manage ziggy</button>' : ''}
       <button class="btn line" id="s-code">Change code</button>
       <button class="btn line" id="s-backup">Download a backup</button>
       ${S.be.demo ? `<button class="btn line" id="s-as">Demo: view as ${S.me.who === 'jaa' ? esc(name('kc')) : esc(name('jaa'))}</button>` : ''}
       <button class="btn danger" id="s-out">Sign out</button>
     </div>`, (b) => {
+    b.querySelector('#s-manage')?.addEventListener('click', () => { closeSheet(); S.back = S.tab === 'manage' ? 'today' : S.tab; S.tab = 'manage'; renderApp(); scroller()?.scrollTo(0, 0); });
     b.querySelector('#s-code').onclick = () => { closeSheet(); renderSetPin(true); };
     b.querySelector('#s-backup').onclick = () => {
       const data = { exported: new Date().toISOString(), timeline: S.timeline, places: S.places, vouchers: S.vouchers, xp: S.xp };
