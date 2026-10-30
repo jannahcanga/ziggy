@@ -41,6 +41,7 @@ function thump(strong = true) { navigator.vibrate?.(strong ? 30 : 12); }
 
 /* ================= ui bits ================= */
 function toast(msg) {
+  if (S.asKC && Date.now() - (S.previewWrite || 0) < 4000) msg = 'Just looking: nothing was saved';
   const t = $('#toast'); t.textContent = msg; t.classList.add('toast-show');
   clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('toast-show'), 2400);
 }
@@ -98,7 +99,7 @@ const sheetOpen = () => !!$('#sheet-root').firstChild;
 // Sends a notification to the ntfy app on baby Jaa's phone. The topic lives in Supabase settings, never on GitHub.
 function notifyJaa(title, message) {
   const topic = S.settings?.notify_topic;
-  if (!topic || S.me?.who !== 'kc' || PREVIEW || S.be?.demo) return;
+  if (!topic || S.me?.who !== 'kc' || S.asKC || PREVIEW || S.be?.demo) return;
   fetch('https://ntfy.sh/', { method: 'POST', body: JSON.stringify({ topic, title, message, tags: ['tulip'], priority: 4 }) }).catch(() => {});
 }
 
@@ -168,9 +169,10 @@ function renderLogin() {
   };
 }
 
-const pinKey = () => 'ziggy-pin-' + S.me.user_id;
+const self = () => S.realMe || S.me;
+const pinKey = () => 'ziggy-pin-' + self().user_id;
 async function hashPin(pin) {
-  const data = new TextEncoder().encode('ziggy:' + S.me.user_id + ':' + pin);
+  const data = new TextEncoder().encode('ziggy:' + self().user_id + ':' + pin);
   if (crypto.subtle) { const h = await crypto.subtle.digest('SHA-256', data); return [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, '0')).join(''); }
   return 'p:' + pin;
 }
@@ -255,9 +257,58 @@ async function unlock() {
   app.innerHTML = '<div class="loading"><img src="brand/tulip-chalk-transparent.png" alt="ziggy"></div>';
   try { await loadAll(); } catch (e) { return renderMessage('Couldn’t load', e.message); }
   S.unlocked = true;
+  if (params.get('view') === 'kc' && S.me.who === 'jaa' && !S.asKC) enterKC(false);
   renderApp();
-  if (S.me.who === 'kc' && !PREVIEW) grantLevels().then((u) => { if (u.length) setTimeout(() => rewardSheet(u), 3800); }).catch(() => {});
+  if (S.me.who === 'kc' && !S.asKC && !PREVIEW) grantLevels().then((u) => { if (u.length) setTimeout(() => rewardSheet(u), 3800); }).catch(() => {});
 }
+/* ================= baby KC's view, for baby Jaa ================= */
+// Shows her exact screens with her real data. Read-only: nothing saves, nothing counts, nobody gets notified.
+function readOnly(be) {
+  return new Proxy(be, { get(t, k) {
+    if (typeof k === 'string' && /^(add|update|delete|mark|redeem|deliver|issue)/.test(k)) return async () => { S.previewWrite = Date.now(); return []; };
+    const v = t[k]; return typeof v === 'function' ? v.bind(t) : v;
+  } });
+}
+function enterKC(render = true) {
+  S.realMe = S.me; S.realBe = S.be;
+  S.me = S.members.find((m) => m.who === 'kc'); S.partner = S.members.find((m) => m.who === 'jaa');
+  S.be = readOnly(S.realBe); S.asKC = true; S.replay = false; S.openedLocal = null;
+  if (S.tab === 'manage') S.tab = 'today';
+  document.body.classList.add('as-kc');
+  if (render) { renderApp(); scroller()?.scrollTo(0, 0); toast(`You’re seeing ziggy as ${name('kc')} sees it`); }
+}
+async function exitKC() {
+  if (params.get('view') || params.get('date')) { location.href = location.pathname; return; }
+  S.me = S.realMe; S.be = S.realBe; S.partner = S.members.find((m) => m !== S.me);
+  S.realMe = null; S.asKC = false; S.replay = false; S.openedLocal = null;
+  document.body.classList.remove('as-kc');
+  try { await loadAll(); } catch {}
+  renderApp(); scroller()?.scrollTo(0, 0); toast('Back to your view');
+}
+// Tapping her drum while looking: same animation and XP she would get, kept on screen only.
+function simulateDrop(sp, before) {
+  const amount = sp ? XP.special : XP.daily;
+  S.xp = [...S.xp, { id: -Date.now(), who: 'kc', amount, reason: 'preview', ref: 'preview:' + Date.now() }];
+  const unlocked = [], L = Math.floor(xpTotal() / XP.perReward);
+  const prizes = S.rewards.filter((r) => r.kind === 'level').sort((a, b) => a.sort - b.sort);
+  if (L > Math.floor(before / XP.perReward) && prizes.length) unlocked.push({ ...prizes[(L - 1) % prizes.length], xp: L * XP.perReward });
+  return { gained: amount, unlocked };
+}
+function kcViewSheet() {
+  openSheet(`<h2>${esc(name('kc'))}’s view</h2>
+    <p class="lead">This is exactly what she sees, with her real XP, wallet and drop. Nothing you tap here saves or counts for her, and you won’t get notifications.</p>
+    <div class="stack-y">
+      <button class="btn line" id="kv-replay" type="button">Replay today’s drop</button>
+      <div class="field"><span>See another day</span><div class="row"><input type="date" id="kv-date" value="${esc(PREVIEW || TODAY)}" style="flex:1"><button class="btn line small" id="kv-go" type="button">Go</button></div></div>
+      <p class="muted small" style="margin:0">Hidden from her: To deliver, Coming up, Special days, Issue a voucher, Manage ziggy, and the Bangkok tab until it opens for her.</p>
+      <button class="btn" id="kv-exit" type="button">Back to my view</button>
+    </div>`, (b) => {
+    b.querySelector('#kv-replay').onclick = () => { S.replay = true; S.openedLocal = null; S.tab = 'today'; closeSheet(); renderApp(); scroller()?.scrollTo(0, 0); };
+    b.querySelector('#kv-go').onclick = () => { const d = b.querySelector('#kv-date').value; if (d) location.href = `${location.pathname}?view=kc&date=${d}`; };
+    b.querySelector('#kv-exit').onclick = () => { closeSheet(); exitKC(); };
+  });
+}
+
 async function refresh() {
   try { await loadAll(); if (!sheetOpen()) { S.calm = true; renderApp(); } } catch {}
 }
@@ -290,11 +341,13 @@ function renderApp() {
     </header>
     <main class="view" id="view"></main>
   </div>
+  ${S.asKC ? `<button class="kc-pill" id="kc-pill" type="button">Viewing as ${esc(name('kc'))}<span>Options</span></button>` : ''}
   <nav class="nav" aria-label="Sections">
     ${tabs.map(([k, l, isNew]) => `<button data-tab="${k}" class="${isNew && S.tab !== k ? 'new' : ''}" ${S.tab === k ? 'aria-current="page"' : ''}>${l}</button>`).join('')}
   </nav>`;
   $('.nav').onclick = (e) => { const t = e.target.closest('button')?.dataset.tab; if (t && t !== S.tab) { S.tab = t; thump(false); renderApp(); scroller()?.scrollTo(0, 0); } };
   $('#settings').onclick = openSettings;
+  $('#kc-pill')?.addEventListener('click', kcViewSheet);
   bindCounter();
   ({ today: viewToday, wallet: viewWallet, us: viewUs, bangkok: viewBangkok, manage: viewManage })[S.tab]();
   if (!S.calm) $('#view').classList.add('enter');
@@ -517,7 +570,7 @@ function animateGain(from, to) {
       $('#xp-mood').textContent = moodFor(toInto); $('#xp-left').innerHTML = leftText(toInto);
     }, 900);
   }, 700);
-  if (S.me.who === 'kc') try { localStorage.setItem('ziggy-xp-seen', String(to)); } catch {}
+  if (S.me.who === 'kc' && !S.asKC) try { localStorage.setItem('ziggy-xp-seen', String(to)); } catch {}
 }
 function toDeliverHTML() {
   if (S.me.who !== 'jaa') return '';
@@ -530,11 +583,11 @@ function toDeliverHTML() {
 function viewToday() {
   const v = $('#view');
   const sp = specialFor(TODAY);
-  const opened = S.opens.some((o) => o.drop_day === TODAY && o.who === S.me.who) || S.openedLocal === TODAY;
+  const opened = !(S.asKC && S.replay) && (S.opens.some((o) => o.drop_day === TODAY && o.who === S.me.who) || S.openedLocal === TODAY);
   const upcoming = S.me.who === 'jaa' ? Array.from({ length: 7 }, (_, i) => addDays(TODAY, i + 1)).map((day) => [day, specialFor(day)]) : [];
   const isKC = S.me.who === 'kc', total = xpTotal();
   let seen = NaN; try { seen = Number(localStorage.getItem('ziggy-xp-seen') ?? NaN); } catch {}
-  const catchUp = isKC && !PREVIEW && Number.isFinite(seen) && total > seen && !S.animating;
+  const catchUp = isKC && !S.asKC && !PREVIEW && Number.isFinite(seen) && total > seen && !S.animating;
   v.innerHTML = `
     <p class="today-date">${fmt(TODAY, { weekday: 'long', month: 'long', day: 'numeric' })}</p>
     <div class="stage" id="stage">${opened ? dropCardHTML(sp) : drumHTML(sp)}</div>
@@ -549,7 +602,7 @@ function viewToday() {
     S.animating = true;
     const bonus = S.xp.filter((x) => x.ref.startsWith('bonus:')).pop();
     setTimeout(() => { animateGain(seen, total); S.animating = false; if (bonus) setTimeout(() => toast(`From ${name('jaa')}: ${bonus.reason.replace(/^bonus: ?/, '') || 'bonus XP'}`), 1800); }, 500);
-  } else if (isKC && !PREVIEW) { try { localStorage.setItem('ziggy-xp-seen', String(total)); } catch {} }
+  } else if (isKC && !S.asKC && !PREVIEW) { try { localStorage.setItem('ziggy-xp-seen', String(total)); } catch {} }
 
   $('#xp-cat')?.addEventListener('click', () => {
     const into = Number($('#xp')?.style.getPropertyValue('--p')) || 0, rest = idleFace(into);
@@ -575,7 +628,9 @@ function viewToday() {
     const isKC = S.me.who === 'kc';
     let gained = 0, unlocked = [];
     const before = xpTotal();
-    if (!PREVIEW) {
+    S.replay = false;
+    if (S.asKC) ({ gained, unlocked } = simulateDrop(sp, before));
+    else if (!PREVIEW) {
       try {
         await S.be.markOpen(TODAY, S.me.who);
         if (isKC) ({ gained, unlocked } = await awardDrop(sp));
@@ -1100,12 +1155,17 @@ function voucherEdit(x) {
 function openSettings() {
   openSheet(`<h2>Settings</h2><p class="lead">Signed in as ${esc(S.me.display)}.</p>
     <div class="stack-y">
+      ${S.asKC ? `<button class="btn" id="s-exitkc">Back to my view</button>` : ''}
       ${S.me.who === 'jaa' ? '<button class="btn" id="s-manage">Manage ziggy</button>' : ''}
+      ${S.me.who === 'jaa' ? `<button class="btn line" id="s-askc">See ziggy as ${esc(name('kc'))}</button>` : ''}
       <button class="btn line" id="s-code">Change code</button>
       <button class="btn line" id="s-backup">Download a backup</button>
       ${S.be.demo ? `<button class="btn line" id="s-as">Demo: view as ${S.me.who === 'jaa' ? esc(name('kc')) : esc(name('jaa'))}</button>` : ''}
       <button class="btn danger" id="s-out">Sign out</button>
     </div>`, (b) => {
+    b.querySelector('#s-askc')?.addEventListener('click', () => { closeSheet(); enterKC(); });
+    b.querySelector('#s-exitkc')?.addEventListener('click', () => { closeSheet(); exitKC(); });
+    if (S.asKC) b.querySelectorAll('#s-code, #s-backup, #s-out').forEach((x) => x.addEventListener('click', (e) => { e.stopImmediatePropagation(); toast(`${name('kc')} would see this. It’s off while you’re looking.`); }, true));
     b.querySelector('#s-manage')?.addEventListener('click', () => { closeSheet(); S.back = S.tab === 'manage' ? 'today' : S.tab; S.tab = 'manage'; renderApp(); scroller()?.scrollTo(0, 0); });
     b.querySelector('#s-code').onclick = () => { closeSheet(); renderSetPin(true); };
     b.querySelector('#s-backup').onclick = () => {
