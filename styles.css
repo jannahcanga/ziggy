@@ -517,3 +517,50 @@ html, body { height: 100%; overflow: hidden; }
 .tl-item p { font-size: 13px; margin-top: 4px; line-height: 1.45; }
 .tl-now { margin: 14px 0 4px; }
 .since { font-size: 18px; }
+
+/* ---------- the poetry book (update 8) ---------- */
+.tl-item.book { cursor: pointer; }
+.book-row { display: flex; align-items: center; gap: 12px; margin-top: 10px; flex-wrap: wrap; }
+.book-row .book-bar { flex: 1 1 80px; height: 3px; border-radius: 3px; background: rgba(255,255,255,.08); overflow: hidden; min-width: 60px; }
+.book-row .book-bar i { display: block; height: 100%; background: linear-gradient(90deg, rgba(169,143,240,.4), var(--orchid)); box-shadow: 0 0 10px rgba(169,143,240,.6); }
+.book-row small { font-size: 12px; color: var(--smoke); white-space: nowrap; }
+.book-row .btn { margin-left: auto; }
+.book-wait { position: fixed; inset: 0; z-index: 1200; display: grid; place-content: center; justify-items: center; gap: 12px; background: rgba(0,0,0,.92); color: var(--smoke); font-size: 13px; animation: fade .3s; }
+.book-wait img { width: 54px; animation: breathe 2s ease-in-out infinite; }
+.upload { display: block; text-align: center; cursor: pointer; }
+.upload.busy { opacity: .5; pointer-events: none; }
+
+.reader { position: fixed; inset: 0; z-index: 1100; background: #000; opacity: 0; transform: translateY(18px); transition: opacity .32s var(--ease), transform .32s var(--ease); display: flex; flex-direction: column; }
+.reader.in { opacity: 1; transform: none; }
+.r-top { flex: none; display: grid; grid-template-columns: 44px 1fr 44px; align-items: center; padding: calc(var(--safe-t) + 8px) 14px 8px; }
+.r-close { all: unset; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; cursor: pointer; background: var(--glass-bg); box-shadow: var(--glass-edge); }
+.r-close::before, .r-close::after { content: ''; position: absolute; width: 14px; height: 1.5px; background: var(--mist); }
+.r-close { position: relative; }
+.r-close::before { transform: rotate(45deg); } .r-close::after { transform: rotate(-45deg); }
+.r-close:focus-visible { outline: 1px solid var(--orchid); outline-offset: 3px; }
+.r-part { text-align: center; font-size: 12px; color: var(--smoke); letter-spacing: .04em; }
+.r-count { text-align: right; font-size: 12px; color: var(--smoke); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.r-line { flex: none; height: 2px; margin: 0 22px; background: rgba(255,255,255,.06); border-radius: 2px; overflow: hidden; }
+.r-line i { display: block; height: 100%; width: 0; background: var(--orchid); box-shadow: 0 0 8px rgba(169,143,240,.7); transition: width .8s var(--ease); }
+.r-track { flex: 1; display: flex; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory; overscroll-behavior: contain; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.r-track::-webkit-scrollbar { display: none; }
+.r-page { flex: 0 0 100%; scroll-snap-align: start; scroll-snap-stop: always; overflow-y: auto; overflow-x: hidden; display: flex; scrollbar-width: none; }
+.r-page::-webkit-scrollbar { display: none; }
+.r-inner { margin: auto; width: 100%; max-width: 560px; padding: 36px 30px 40px; }
+.r-inner p { font-family: var(--serif); font-size: 20px; line-height: 1.5; color: #e9e9e7; margin: 0 0 1.05em; text-wrap: pretty; }
+.r-inner h3 { font-family: var(--serif); font-style: italic; font-weight: 400; font-size: 27px; line-height: 1.15; margin: 0 0 22px; color: var(--chalk); }
+.r-inner h3 strong, .r-inner h3 em { font-weight: 400; }
+.r-inner strong { font-weight: 400; color: var(--chalk); }
+.r-inner .c { text-align: center; }
+.is-f .r-inner p, .is-t .r-inner p, .is-e .r-inner p { font-size: 18px; }
+.is-t .r-inner p { font-size: 23px; line-height: 1.45; }
+.r-err { color: var(--smoke); font-size: 15px !important; }
+.r-wait { width: 36px; height: 36px; margin: 0 auto; border-radius: 50%; border: 1px solid rgba(255,255,255,.12); border-top-color: var(--orchid); animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.r-foot { flex: none; display: flex; justify-content: center; align-items: center; min-height: 44px; padding: 6px 20px calc(var(--safe-b) + 12px); position: relative; }
+.r-state { font-size: 12px; color: var(--smoke); display: inline-flex; align-items: center; gap: 6px; position: relative; }
+.r-state:not(:empty)::before { content: ''; width: 9px; height: 5px; border-left: 1.5px solid var(--orchid); border-bottom: 1.5px solid var(--orchid); transform: rotate(-45deg) translateY(-2px); }
+.r-state.pop::after { content: attr(data-xp); position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); color: var(--orchid); font-size: 13px; white-space: nowrap; text-shadow: 0 0 12px rgba(169,143,240,.8); animation: xpUp 2s var(--ease) forwards; }
+.r-hint { position: absolute; font-size: 12px; color: var(--dim); transition: opacity .6s; }
+.r-hint.gone { opacity: 0; }
+.r-state:not(:empty) ~ .r-hint { opacity: 0; }

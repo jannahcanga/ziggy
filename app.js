@@ -248,10 +248,10 @@ function renderSetPin(changing = false) {
 async function loadAll() {
   const be = S.be;
   const soft = (p) => p.catch(() => []); // xp and rewards stay empty until update 3's SQL has run
-  const [settings, words, drops, opens, vouchers, timeline, places, xp, rewards] = await Promise.all([
-    be.settings(), be.words(), be.drops(), be.opens(), be.vouchers(), be.timeline(), be.places(), soft(be.xp()), soft(be.rewards()),
+  const [settings, words, drops, opens, vouchers, timeline, places, xp, rewards, progress] = await Promise.all([
+    be.settings(), be.words(), be.drops(), be.opens(), be.vouchers(), be.timeline(), be.places(), soft(be.xp()), soft(be.rewards()), soft(be.bookProgress()),
   ]);
-  Object.assign(S, { settings, words, drops, opens, vouchers, timeline, places, xp, rewards });
+  Object.assign(S, { settings, words, drops, opens, vouchers, timeline, places, xp, rewards, progress });
 }
 async function unlock() {
   app.innerHTML = '<div class="loading"><img src="brand/tulip-chalk-transparent.png" alt="ziggy"></div>';
@@ -600,7 +600,9 @@ function viewToday() {
 
   if (catchUp) {
     S.animating = true;
-    const bonus = S.xp.filter((x) => x.ref.startsWith('bonus:')).pop();
+    let told = 0; try { told = Number(localStorage.getItem('ziggy-bonus-seen') || 0); } catch {}
+    const bonus = S.xp.filter((x) => x.ref.startsWith('bonus:') && x.id > told).pop();
+    if (bonus) try { localStorage.setItem('ziggy-bonus-seen', String(bonus.id)); } catch {}
     setTimeout(() => { animateGain(seen, total); S.animating = false; if (bonus) setTimeout(() => toast(`From ${name('jaa')}: ${bonus.reason.replace(/^bonus: ?/, '') || 'bonus XP'}`), 1800); }, 500);
   } else if (isKC && !S.asKC && !PREVIEW) { try { localStorage.setItem('ziggy-xp-seen', String(total)); } catch {} }
 
@@ -839,6 +841,7 @@ function viewUs() {
   const now = '<p class="tl-now">today</p>';
   const item = (m) => {
     const when = m.precision === 'month' ? fmt(m.happened_on, { month: 'short' }) : fmt(m.happened_on, { month: 'short', day: 'numeric' });
+    if (m.book_part) return bookItemHTML(m, when);
     return `<button class="tl-item" type="button" data-id="${m.id}"><span class="when">${when}</span><span><h3>${esc(m.title)}</h3>${m.note ? `<p>${esc(m.note)}</p>` : ''}${m.added_by && m.added_by !== 'jaa' ? `<div class="by">added by ${esc(name(m.added_by))}</div>` : ''}</span></button>`;
   };
   const html = groups.map((g, gi) => {
@@ -866,8 +869,70 @@ function viewUs() {
       try { localStorage.setItem('ziggy-tl-closed', JSON.stringify([...set])); } catch {}
       thump(false); return;
     }
+    const rd = e.target.closest('[data-read]');
+    if (rd) return openBook(Number(rd.dataset.read));
     const id = e.target.closest('.tl-item')?.dataset.id; if (id) momentForm(S.timeline.find((m) => m.id === Number(id)));
   };
+}
+/* ================= the poetry book ================= */
+const toRoman = (n) => ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'][n] || String(n);
+function bookParts() { try { return JSON.parse(S.settings.book_map || 'null'); } catch { return null; } }
+function poemsRead() { return new Set(S.xp.filter((x) => x.who === 'kc' && x.ref.startsWith('poem:')).map((x) => Number(x.ref.slice(5)))); }
+function bookItemHTML(m, when) {
+  const pages = bookParts()?.[m.book_part] || [];
+  const poems = pages.filter(([, k]) => k === 'p'), read = poemsRead();
+  const done = poems.filter(([n]) => read.has(n)).length, total = poems.length;
+  const mine = S.me.who === 'kc';
+  const started = S.progress.some((r) => r.who === S.me.who && r.part === m.book_part);
+  const label = !total ? 'Read' : done >= total ? 'Read again' : (done || started) ? 'Continue' : 'Read';
+  const line = total ? `${mine ? '' : `${esc(name('kc'))} has read `}${done} of ${total} ${mine ? 'read' : ''}`.trim() : '';
+  return `<div class="tl-item book" role="button" tabindex="0" data-id="${m.id}"><span class="when">${when}</span><span>
+    <h3>${esc(m.title)}</h3>${m.note ? `<p>${esc(m.note)}</p>` : ''}
+    <div class="book-row">${total ? `<div class="book-bar" aria-hidden="true"><i style="width:${total ? done / total * 100 : 0}%"></i></div><small>${line}</small>` : '<small>Poems</small>'}
+      <button class="btn line small" type="button" data-read="${m.book_part}">${label}</button></div>
+  </span></div>`;
+}
+async function openBook(part) {
+  const pages = bookParts()?.[part];
+  if (!pages?.length || !S.settings.book_version) return toast(S.me.who === 'jaa' && !S.asKC ? 'Upload the book in Manage ziggy first' : 'This part isn’t ready yet');
+  const wait = document.createElement('div'); wait.className = 'book-wait'; wait.innerHTML = '<img src="brand/tulip-chalk-transparent.png" alt=""><span>Opening</span>';
+  document.body.appendChild(wait);
+  let mod;
+  try { mod = await import('./book.js'); await mod.loadBook(() => S.be.bookDownload(), S.settings.book_version); }
+  catch { wait.remove(); return toast('The book didn’t open. Check your connection and try again.'); }
+  wait.remove();
+  const read = poemsRead(), isKC = S.me.who === 'kc' && !S.asKC;
+  const saved = S.progress.find((r) => r.who === S.me.who && r.part === part)?.page;
+  let gained = 0, saveT = null;
+  scroller()?.classList.add('locked');
+  mod.openReader({
+    pages, partLabel: `Part ${toRoman(part)}`,
+    startIndex: Math.max(0, pages.findIndex(([n]) => n === saved)),
+    isRead: (n) => read.has(n),
+    onRead: async (n) => {
+      if (!isKC) return null;
+      try {
+        const rows = await S.be.addXp({ who: 'kc', amount: 1, reason: 'read a poem', ref: 'poem:' + n });
+        read.add(n);
+        if (rows.length) { gained += 1; S.xp = [...S.xp, ...rows]; navigator.vibrate?.(12); return 1; }
+        return 0;
+      } catch { return null; }
+    },
+    onPage: (n) => {
+      const row = { who: S.me.who, part, page: n, updated_at: new Date().toISOString() };
+      S.progress = [...S.progress.filter((r) => !(r.who === row.who && r.part === part)), row];
+      clearTimeout(saveT); saveT = setTimeout(() => S.be.markProgress(row).catch(() => {}), 900);
+    },
+    onClose: async () => {
+      scroller()?.classList.remove('locked');
+      if (S.tab === 'us') viewUs();
+      if (gained && isKC) {
+        toast(`+${gained} XP for reading`);
+        const u = await grantLevels().catch(() => []);
+        if (u.length) setTimeout(() => rewardSheet(u), 900);
+      }
+    },
+  });
 }
 function momentForm(m) {
   const editing = !!m;
@@ -877,12 +942,14 @@ function momentForm(m) {
       <label class="check"><input type="checkbox" name="month" ${m?.precision === 'month' ? 'checked' : ''}> Only show the month</label>
       <label class="field"><span>What happened</span><input name="title" required maxlength="80" value="${esc(m?.title || '')}" ${editing ? '' : 'autofocus'}></label>
       <label class="field"><span>Details (optional)</span><textarea name="note" maxlength="400">${esc(m?.note || '')}</textarea></label>
+      ${S.me.who === 'jaa' && bookParts() ? `<label class="field"><span>Opens the poetry book</span><select name="book"><option value="">No</option>${Object.keys(bookParts()).map((k) => `<option value="${k}" ${Number(m?.book_part) === Number(k) ? 'selected' : ''}>Part ${toRoman(Number(k))}</option>`).join('')}</select></label>` : ''}
       <button class="btn" type="submit">${editing ? 'Save' : 'Add to timeline'}</button>
       ${editing ? '<button class="btn danger" type="button" id="del">Delete</button>' : ''}
     </form>`, (b) => {
     b.querySelector('#mf').onsubmit = async (e) => {
       e.preventDefault(); const f = new FormData(e.target);
       const row = { happened_on: f.get('date'), precision: f.get('month') ? 'month' : 'day', title: f.get('title').trim(), note: f.get('note').trim() || null };
+      if (f.has('book')) row.book_part = f.get('book') ? Number(f.get('book')) : null;
       try {
         if (editing) await S.be.updateMoment(m.id, row); else await S.be.addMoment({ ...row, added_by: S.me.who });
         S.timeline = await S.be.timeline(); closeSheet(); viewUs(); toast(editing ? 'Saved' : 'Added to your timeline');
@@ -1080,6 +1147,11 @@ function viewManage() {
     <ul class="mlist" id="m-special">${treats.map((r) => row('data-reward', r.id, r.title, r.sub)).join('')}</ul>
     <p class="note-small">Used on monthsaries and special days that don’t have their own treat.</p>
 
+    <div class="section-head"><h2>Poetry book</h2></div>
+    <p class="muted small" style="margin:0 0 12px">${bookParts() ? `On ziggy: ${Object.entries(bookParts()).map(([k, v]) => `Part ${toRoman(Number(k))}, ${v.filter(([, t]) => t === 'p').length} poems`).join('; ')}. Upload a new PDF here whenever you add a part.` : 'Upload the PDF once. It stays private to the 2 of you, and ziggy splits it into parts and poems on its own.'}</p>
+    <label class="btn line upload" id="m-book-label"><input type="file" accept="application/pdf" id="m-book" hidden>${bookParts() ? 'Upload a new version' : 'Upload the PDF'}</label>
+    <p class="note-small" id="m-book-status"></p>
+
     <div class="section-head"><h2>In her wallet</h2></div>
     <ul class="mlist" id="m-vouchers">${unused.map((x) => row('data-voucher', x.id, x.title, x.sub)).join('') || '<li class="muted small">Nothing unused right now.</li>'}</ul>
     <p class="note-small">Special days are on Today. Timeline moments and Bangkok spots are edited right where they are.</p>`;
@@ -1108,6 +1180,28 @@ function viewManage() {
   });
   v.querySelectorAll('[data-addreward]').forEach((b) => b.onclick = () => rewardForm(null, b.dataset.addreward));
   ['#m-level', '#m-special'].forEach((sel) => $(sel)?.addEventListener('click', (e) => { const id = e.target.closest('[data-reward]')?.dataset.reward; if (id) rewardForm(S.rewards.find((r) => r.id === Number(id))); }));
+  $('#m-book')?.addEventListener('change', async (e) => {
+    const file = e.target.files?.[0]; if (!file) return;
+    const st = $('#m-book-status'), label = $('#m-book-label');
+    label.classList.add('busy');
+    try {
+      st.textContent = 'Reading the book…';
+      const mod = await import('./book.js');
+      await mod.openFile(file);
+      const parts = await mod.bookMap((n, t) => { st.textContent = `Reading page ${n} of ${t}…`; });
+      const counts = Object.entries(parts).map(([k, v]) => `Part ${toRoman(Number(k))}: ${v.filter(([, t]) => t === 'p').length} poems`);
+      if (!counts.length) throw new Error('No parts found');
+      st.textContent = 'Uploading privately…';
+      await S.be.updateBook(file);
+      const version = String(Date.now());
+      await S.be.updateSetting('book_map', JSON.stringify(parts));
+      await S.be.updateSetting('book_version', version);
+      S.settings = await S.be.settings();
+      toast('The book is on ziggy'); viewManage();
+      $('#m-book-status').textContent = `Done. ${counts.join(', ')}.`;
+    } catch (err) { st.textContent = 'That didn’t work: ' + (err.message || 'try again') + '.'; label.classList.remove('busy'); }
+    e.target.value = '';
+  });
   $('#m-vouchers')?.addEventListener('click', (e) => { const id = e.target.closest('[data-voucher]')?.dataset.voucher; if (id) voucherEdit(S.vouchers.find((x) => x.id === Number(id))); });
 }
 function confirmDelete(btn, run) {

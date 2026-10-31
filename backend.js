@@ -46,6 +46,12 @@ export async function createSupabaseBackend(url, key) {
     updateVoucher: (id, v) => run(sb.from('vouchers').update(v).eq('id', id).select()),
     deleteVoucher: (id) => run(sb.from('vouchers').delete().eq('id', id)),
     timeline: () => run(sb.from('timeline').select('*').order('happened_on')),
+    updateSetting: (key, value) => run(sb.from('settings').upsert({ key, value }, { onConflict: 'key' }).select()),
+    bookProgress: () => run(sb.from('book_progress').select('*')),
+    markProgress: (row) => run(sb.from('book_progress').upsert(row, { onConflict: 'who,part' })),
+    // the book PDF sits in a private storage bucket only the 2 of you can open
+    bookDownload: async () => { const { data, error } = await sb.storage.from('book').download('book.pdf'); if (error) throw new Error(error.message); return data; },
+    updateBook: async (file) => { const { error } = await sb.storage.from('book').upload('book.pdf', file, { upsert: true, contentType: 'application/pdf' }); if (error) throw new Error(error.message); },
     addMoment: (m) => run(sb.from('timeline').insert(m).select()),
     updateMoment: (id, m) => run(sb.from('timeline').update(m).eq('id', id).select()),
     deleteMoment: (id) => run(sb.from('timeline').delete().eq('id', id)),
