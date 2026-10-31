@@ -587,7 +587,7 @@ html, body { overscroll-behavior: none; }
 .map-card .disc-top, .map-card .holo, .map-card .scan, .map-card .holo-fill, .map-card .beam { animation-play-state: paused; }
 .map-card.on .disc-top, .map-card.on .holo, .map-card.on .scan, .map-card.on .holo-fill, .map-card.on .beam { animation-play-state: running; }
 .disc-top { animation: float 4.6s ease-in-out infinite; }
-.holo { transform-box: view-box; transform-origin: 150px 168px; animation: holo 8s ease-in-out infinite; }
+.holo { transform-box: view-box; transform-origin: 150px 156px; animation: holo 8s ease-in-out infinite; }
 @keyframes holo { 0%, 100% { transform: translateY(0) scaleX(1); } 25% { transform: translateY(-5px) scaleX(.93); } 50% { transform: translateY(-1px) scaleX(1); } 75% { transform: translateY(-6px) scaleX(.96); } }
 .holo-fill { animation: flick 6s steps(1) infinite; }
 @keyframes flick { 0%, 100% { opacity: 1; } 91% { opacity: .55; } 92% { opacity: 1; } 94% { opacity: .7; } 95% { opacity: 1; } }
@@ -666,7 +666,7 @@ html, body { overscroll-behavior: none; }
   box-shadow: inset 0 0 0 1px rgba(255,255,255,.18), inset 0 1px 0 rgba(255,255,255,.16), 0 30px 80px rgba(0,0,0,.6), 0 0 60px rgba(169,143,240,.10); -webkit-tap-highlight-color: transparent; }
 .cs-top { width: 100%; display: flex; justify-content: space-between; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--smoke); }
 .cs-top span:last-child { color: var(--orchid); }
-.cs-stage { width: 100%; margin: 4px 0 -4px; }
+.cs-stage { width: 100%; margin: 4px 0 -4px; position: relative; }
 .cs-base { width: 100%; height: auto; display: block; overflow: visible; }
 .cs-text { display: grid; justify-items: center; }
 .cs-text.swap { animation: csIn .5s var(--ease); }
@@ -674,13 +674,13 @@ html, body { overscroll-behavior: none; }
 .console .mc-name { font-family: var(--serif); font-size: 38px; line-height: 1.05; letter-spacing: -.01em; margin-top: 4px; }
 .console .mc-sub { font-size: 13px; color: var(--mist); margin-top: 6px; font-weight: 300; }
 .console.is-new .mc-name { color: var(--mist); }
-.cs-rail { position: absolute; left: 16px; right: 16px; top: 37px; bottom: 0; display: flex; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory; scrollbar-width: none;
+.cs-rail { position: absolute; left: 0; right: 0; top: 0; bottom: -96px; z-index: 1; display: flex; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory; scrollbar-width: none;
   -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain;
   -webkit-mask-image: linear-gradient(90deg, transparent 6%, #000 30%, #000 70%, transparent 94%); mask-image: linear-gradient(90deg, transparent 6%, #000 30%, #000 70%, transparent 94%); }
 .cs-rail::-webkit-scrollbar { display: none; }
 .cs-slide { --o: 0; --a: 0; flex: 0 0 100%; scroll-snap-align: center; scroll-snap-stop: always; }
 .cs-slide svg { width: 100%; height: auto; display: block; overflow: visible;
-  transform: translateX(calc(var(--o) * -22%)) scale(calc(1 - var(--a) * .35)); transform-origin: 50% 51%; opacity: calc(1 - var(--a) * .9); filter: blur(calc(var(--a) * 3px)); }
+  transform: translateX(calc(var(--o) * -22%)) scale(calc(1 - var(--a) * .35)); transform-origin: 50% 47%; opacity: calc(1 - var(--a) * .9); filter: blur(calc(var(--a) * 3px)); }
 .cs-slide.new .holo-line { stroke-dasharray: 3 4; }
 .cs-slide .holo, .cs-slide .scan, .cs-slide .holo-fill { animation-play-state: paused; }
 .cs-slide.on .holo, .cs-slide.on .scan, .cs-slide.on .holo-fill { animation-play-state: running; }

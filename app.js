@@ -106,11 +106,7 @@ const sheetOpen = () => !!$('#sheet-root').firstChild;
 const STANDALONE = navigator.standalone === true; // only iPhones/iPads report this
 let tallest = window.innerHeight;
 window.addEventListener('resize', () => { if (!document.activeElement?.matches?.('input, textarea, select')) tallest = Math.max(tallest, window.innerHeight); });
-function shortBy() {
-  const portrait = matchMedia('(orientation: portrait)').matches;
-  const full = Math.max(tallest, STANDALONE && portrait ? screen.height : 0);
-  return full - window.innerHeight;
-}
+const shortBy = () => tallest - window.innerHeight;
 function healViewport() {
   if (!STANDALONE || document.hidden || document.activeElement?.matches?.('input, textarea, select') || shortBy() <= 4) return;
   const sc = scroller(); if (!sc) return;
@@ -1024,7 +1020,7 @@ const tripCount = (code) => { const ps = tripPlaces(code).filter((p) => p.status
 
 // The hologram: the country's outline floating between two silver discs.
 // The discs stay put; only the hologram slides when you swipe.
-const HOLO_AT = 'translate(72 70) scale(1.56)';
+const HOLO_AT = 'translate(78 84) scale(1.44)'; // keeps the outline clear of both discs
 function holoSVG(uid, d) {
   const u = 'h' + uid;
   return `<svg viewBox="0 0 300 330" aria-hidden="true">
@@ -1038,8 +1034,8 @@ function holoSVG(uid, d) {
   </svg>`;
 }
 const PEDESTAL = `<svg class="cs-base" viewBox="0 0 300 330" aria-hidden="true">
-    <path class="beam" d="M84 282 L102 60 L198 60 L216 282 Z" fill="url(#tv-beam)"/>
-    <path d="M102 60 L84 282 M198 60 L216 282" stroke="rgba(207,194,255,.14)" stroke-width="1"/>
+    <path class="beam" d="M84 282 L101 46 L199 46 L216 282 Z" fill="url(#tv-beam)"/>
+    <path d="M101 46 L84 282 M199 46 L216 282" stroke="rgba(207,194,255,.14)" stroke-width="1"/>
     <g class="disc-top">
       <path d="M74 42 v8 a76 14 0 0 0 152 0 v-8" fill="url(#tv-edge)"/>
       <ellipse cx="150" cy="42" rx="76" ry="14" fill="url(#tv-lid)"/>
@@ -1088,11 +1084,12 @@ async function viewMaps() {
     <p class="maps-hint">Choose a map</p>
     <div class="console" id="console">
       <div class="cs-top"><span id="cs-no"></span><span id="cs-tag"></span></div>
-      <div class="cs-stage">${PEDESTAL}</div>
-      <div class="cs-text"><span class="mc-name" id="cs-name"></span><span class="mc-sub" id="cs-sub"></span></div>
-      <div class="cs-rail" id="rail" role="listbox" aria-label="Maps">
-        ${slides.map((s, i) => `<div class="cs-slide ${s.isNew ? 'new' : ''}" role="option" aria-label="${esc(s.name)}" data-i="${i}">${holoSVG(s.code || 'new', s.d)}</div>`).join('')}
+      <div class="cs-stage">${PEDESTAL}
+        <div class="cs-rail" id="rail" role="listbox" aria-label="Maps">
+          ${slides.map((s, i) => `<div class="cs-slide ${s.isNew ? 'new' : ''}" role="option" aria-label="${esc(s.name)}" data-i="${i}">${holoSVG(s.code || 'new', s.d)}</div>`).join('')}
+        </div>
       </div>
+      <div class="cs-text"><span class="mc-name" id="cs-name"></span><span class="mc-sub" id="cs-sub"></span></div>
     </div>
     <div class="map-dots" id="map-dots">${slides.map(() => '<i></i>').join('')}</div>
     <p class="maps-foot">Swipe the map to switch, tap to open</p>`;
@@ -1119,7 +1116,6 @@ async function viewMaps() {
     }
   };
   rail.addEventListener('scroll', () => { raf ||= requestAnimationFrame(paint); }, { passive: true });
-  rail.style.top = $('.cs-stage').offsetTop + 'px';
   const start = Math.max(0, Math.min(S.mapIndex ?? 0, cards.length - 1));
   rail.scrollLeft = start * rail.clientWidth;
   paint(true);
