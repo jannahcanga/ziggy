@@ -323,8 +323,8 @@ function simulateDrop(sp, before) {
   const amount = sp ? XP.special : XP.daily;
   S.xp = [...S.xp, { id: -Date.now(), who: 'kc', amount, reason: 'preview', ref: 'preview:' + Date.now() }];
   const unlocked = [], L = Math.floor(xpTotal() / XP.perReward);
-  const prizes = S.rewards.filter((r) => r.kind === 'level').sort((a, b) => a.sort - b.sort);
-  if (L > Math.floor(before / XP.perReward) && prizes.length) unlocked.push({ ...prizes[(L - 1) % prizes.length], xp: L * XP.perReward });
+  const next = unusedOf('level')[0];
+  if (L > Math.floor(before / XP.perReward) && next) unlocked.push({ ...next, xp: L * XP.perReward });
   return { gained: amount, unlocked };
 }
 function kcViewSheet() {
@@ -459,13 +459,22 @@ function specialFor(day) {
   if (!pinned && !monthsary) return null;
   return { day, pinned, monthsary };
 }
+// Each reward and treat on your lists is given once, in order. When a list gets down to 1, baby Jaa gets a heads-up.
+const unusedOf = (kind) => S.rewards.filter((r) => r.kind === kind && !r.used_at).sort((a, b) => a.sort - b.sort);
+const LIST_NAME = { level: ['reward', '100 XP rewards'], special: ['special day treat', 'special day treats'] };
+function warnIfLow(kind) {
+  const left = unusedOf(kind), [one, many] = LIST_NAME[kind];
+  if (left.length === 1) notifyJaa(`1 ${one} left`, `Only “${left[0].title}” is left. Add more in Manage ziggy.`);
+  else if (!left.length) notifyJaa(`No ${many} left`, kind === 'level' ? 'Add more in Manage ziggy. If she reaches 100 XP before you do, she gets it the next time she opens ziggy.' : 'Add more in Manage ziggy, or the next special day comes without a treat.');
+}
+async function markUsed(id) { await S.be.updateReward(id, { used_at: new Date().toISOString() }); }
 function treatFor(sp) {
   if (!sp) return null;
   if (sp.pinned?.voucher_title) return { title: sp.pinned.voucher_title, sub: sp.pinned.voucher_sub, tier: sp.pinned.voucher_tier || 'orchid' };
-  const list = S.rewards.filter((r) => r.kind === 'special').sort((a, b) => a.sort - b.sort);
-  if (!list.length) return null;
-  const r = list[((dayNum(sp.day) % list.length) + list.length) % list.length];
-  return { title: r.title, sub: r.sub, tier: r.tier };
+  const given = S.vouchers.find((v) => v.source === 'special:' + sp.day);
+  if (given) return { title: given.title, sub: given.sub, tier: given.tier, given: true };
+  const r = unusedOf('special')[0];
+  return r ? { title: r.title, sub: r.sub, tier: r.tier, rewardId: r.id } : null;
 }
 function nickname(day) {
   const r = rng(dayNum(day) * 7919);
@@ -605,6 +614,14 @@ function animateGain(from, to) {
   }, 700);
   if (S.me.who === 'kc' && !S.asKC) try { localStorage.setItem('ziggy-xp-seen', String(to)); } catch {}
 }
+// Only baby Jaa sees this, on Today, when a list is down to its last one.
+function lowHTML() {
+  if (S.me.who !== 'jaa' || S.asKC) return '';
+  const l = unusedOf('level').length, t = unusedOf('special').length;
+  const bits = [l <= 1 && `${l} ${plural(l, 'reward')}`, t <= 1 && `${t} special day ${plural(t, 'treat')}`].filter(Boolean);
+  if (!bits.length) return '';
+  return `<button class="low-note" id="low-go" type="button"><span><b>Running low</b><small>${bits.join(' and ')} left</small></span><span>Add more</span></button>`;
+}
 function toDeliverHTML() {
   if (S.me.who !== 'jaa') return '';
   const list = S.vouchers.filter((v) => v.redeemed_at && !v.delivered_at).sort((a, b) => a.redeemed_at.localeCompare(b.redeemed_at));
@@ -627,8 +644,9 @@ function viewToday() {
     ${toDeliverHTML()}
     ${xpHTML(catchUp ? seen : undefined)}
     ${upcoming.length ? `<details class="peek"><summary>Coming up (only you see this)</summary><ol>
-      ${upcoming.map(([day, s]) => `<li><span>${fmt(day, { month: 'short', day: 'numeric' })}</span><span>${s ? `<b>${esc(s.pinned ? s.pinned.title : `Happy ${milestoneName(s.monthsary)}`)}</b>, +${XP.special} XP and a treat` : esc(nickname(day))}</span></li>`).join('')}
+      ${upcoming.map(([day, s]) => `<li><span>${fmt(day, { month: 'short', day: 'numeric' })}</span><span>${s ? `<b>${esc(s.pinned ? s.pinned.title : `Happy ${milestoneName(s.monthsary)}`)}</b>, +${XP.special} XP${s.pinned?.voucher_title || unusedOf('special').length ? ' and a treat' : ', <em class="low">no treats left to give</em>'}` : esc(nickname(day))}</span></li>`).join('')}
     </ol></details>` : ''}
+    ${lowHTML()}
     ${specialDaysHTML()}`;
 
   if (catchUp) {
@@ -645,6 +663,7 @@ function viewToday() {
     setCat(pick[Math.floor(Math.random() * pick.length)], 1900, 'boop'); thump(false);
   });
   $('#add-day')?.addEventListener('click', () => dayForm());
+  $('#low-go')?.addEventListener('click', () => { S.tab = 'manage'; renderApp(); scroller()?.scrollTo(0, 0); });
   $('#days')?.addEventListener('click', (e) => { const id = e.target.closest('[data-day]')?.dataset.day; if (id) dayForm(S.drops.find((d) => d.id === Number(id))); });
 
   $('#deliver')?.addEventListener('click', async (e) => {
@@ -686,7 +705,10 @@ async function awardDrop(sp) {
   const rows = await be.addXp({ who: 'kc', amount, reason: sp ? 'special day drop' : 'daily drop', ref: 'drop:' + TODAY });
   const gained = rows.length ? amount : 0;
   const treat = treatFor(sp);
-  if (treat) await be.addVoucher({ ...treat, issued_by: 'jaa', source: 'special:' + TODAY });
+  if (treat && !treat.given) {
+    const made = await be.addVoucher({ title: treat.title, sub: treat.sub, tier: treat.tier, issued_by: 'jaa', source: 'special:' + TODAY });
+    if (made.length && treat.rewardId) { await markUsed(treat.rewardId); S.rewards = await be.rewards(); warnIfLow('special'); }
+  }
   S.xp = await be.xp();
   const unlocked = await grantLevels();
   S.vouchers = await be.vouchers();
@@ -696,16 +718,21 @@ async function awardDrop(sp) {
 async function grantLevels() {
   const be = S.be, unlocked = [];
   const level = Math.floor(xpTotal() / XP.perReward);
-  const prizes = S.rewards.filter((r) => r.kind === 'level').sort((a, b) => a.sort - b.sort);
-  if (prizes.length && level > 0) {
+  const queue = unusedOf('level');
+  if (level > 0) {
     const have = new Set(S.vouchers.map((v) => v.source));
     for (let L = 1; L <= level; L++) {
       if (have.has('level:' + L)) continue;
-      const r = prizes[(L - 1) % prizes.length];
+      const r = queue.shift();
+      if (!r) { // reached a reward with an empty list: tell baby Jaa once; she gets it as soon as one is added
+        const k = 'ziggy-empty-told-' + L;
+        if (!localStorage.getItem(k)) { notifyJaa(`baby KC reached ${L * XP.perReward} XP`, 'Your 100 XP rewards list is empty. Add one in Manage ziggy and she gets it the next time she opens ziggy.'); try { localStorage.setItem(k, '1'); } catch {} }
+        break;
+      }
       const made = await be.addVoucher({ title: r.title, sub: r.sub, tier: r.tier, issued_by: 'jaa', source: 'level:' + L });
-      if (made.length) { unlocked.push({ ...r, xp: L * XP.perReward }); notifyJaa('baby KC unlocked a reward', `${L * XP.perReward} XP: ${r.title}`); }
+      if (made.length) { await markUsed(r.id); unlocked.push({ ...r, xp: L * XP.perReward }); notifyJaa('baby KC unlocked a reward', `${L * XP.perReward} XP: ${r.title}`); }
     }
-    if (unlocked.length) S.vouchers = await be.vouchers();
+    if (unlocked.length) { [S.vouchers, S.rewards] = await Promise.all([be.vouchers(), be.rewards()]); warnIfLow('level'); }
   }
   return unlocked;
 }
@@ -835,6 +862,9 @@ function redeem(id) {
         thump(true);
         notifyJaa('baby KC used a voucher', `${x.title}${x.sub ? `, ${x.sub}` : ''}`);
         S.vouchers = await S.be.vouchers();
+        const left = S.vouchers.filter((v) => !v.redeemed_at).length;
+        if (left === 1) notifyJaa('1 voucher left in her wallet', 'Issue a new one in Manage ziggy whenever you’re ready.');
+        else if (!left) notifyJaa('Her wallet is empty', 'Every voucher is used. Issue a new one in Manage ziggy.');
         closeSheet(); viewWallet(); toast('On its way');
       } catch (err) { toast('Didn’t go through. Try again.'); e.target.disabled = false; }
     };
@@ -1590,7 +1620,11 @@ function viewManage() {
   const levels = S.rewards.filter((r) => r.kind === 'level').sort((a, b) => a.sort - b.sort);
   const treats = S.rewards.filter((r) => r.kind === 'special').sort((a, b) => a.sort - b.sort);
   const nextLevel = Math.floor(xpTotal() / XP.perReward) + 1;
-  const nextPrize = levels.length ? levels[(nextLevel - 1) % levels.length] : null;
+  const lq = unusedOf('level'), tq = unusedOf('special');
+  const nextPrize = lq[0] || null;
+  const given = (list) => list.filter((r) => r.used_at).sort((a, b) => b.used_at.localeCompare(a.used_at));
+  const givenHTML = (list) => list.length ? `<details class="given"><summary>Already given, ${list.length}</summary><ul class="mlist">${list.map((r) => `<li><button type="button" data-reward="${r.id}"><b>${esc(r.title)}</b><small>given ${fmt(r.used_at.slice(0, 10), { month: 'short', day: 'numeric' })}</small></button></li>`).join('')}</ul></details>` : '';
+  const leftNote = (n, what) => `<p class="note-small ${n <= 1 ? 'low' : ''}">${n} ${plural(n, what)} left${n <= 1 ? ', time to add more' : ''}. Each one is given once, in this order.</p>`;
   const unused = S.vouchers.filter((x) => !x.redeemed_at).sort((a, b) => a.id - b.id);
   const bonuses = S.xp.filter((x) => x.ref.startsWith('bonus:')).slice(-5).reverse();
   const chips = (list) => list.map((w) => `<button type="button" class="wchip" data-word="${w.id}">${esc(w.word)}</button>`).join('');
@@ -1616,12 +1650,16 @@ function viewManage() {
     ${bonuses.length ? `<ul class="mlist" id="m-bonuses">${bonuses.map((x) => `<li><div><b>+${x.amount} XP</b><small>${esc(x.reason.replace(/^bonus: ?/, '') || 'bonus')}</small></div><button type="button" class="btn quiet small" data-unbonus="${x.id}">Remove</button></li>`).join('')}</ul>` : ''}
 
     <div class="section-head"><h2>Rewards every 100 XP</h2><button class="btn line small" type="button" data-addreward="level">Add</button></div>
-    <ol class="mlist num" id="m-level">${levels.map((r) => row('data-reward', r.id, r.title, r.sub)).join('')}</ol>
-    ${nextPrize ? `<p class="note-small">Given in this order, then it starts over. Her next one, at ${nextLevel * XP.perReward} XP: ${esc(nextPrize.title)}.</p>` : ''}
+    <ol class="mlist num" id="m-level">${lq.map((r) => row('data-reward', r.id, r.title, r.sub)).join('')}</ol>
+    ${leftNote(lq.length, 'reward')}
+    ${nextPrize ? `<p class="note-small">Her next one, at ${nextLevel * XP.perReward} XP: ${esc(nextPrize.title)}.</p>` : ''}
+    ${givenHTML(given(levels))}
 
     <div class="section-head"><h2>Special day treats</h2><button class="btn line small" type="button" data-addreward="special">Add</button></div>
-    <ul class="mlist" id="m-special">${treats.map((r) => row('data-reward', r.id, r.title, r.sub)).join('')}</ul>
+    <ul class="mlist" id="m-special">${tq.map((r) => row('data-reward', r.id, r.title, r.sub)).join('')}</ul>
+    ${leftNote(tq.length, 'treat')}
     <p class="note-small">Used on monthsaries and special days that don’t have their own treat.</p>
+    ${givenHTML(given(treats))}
 
     <div class="section-head"><h2>Poetry book</h2></div>
     <p class="muted small" style="margin:0 0 12px">${bookParts() ? `On ziggy: ${Object.entries(bookParts()).map(([k, v]) => `Part ${toRoman(Number(k))}, ${v.filter(([, t]) => t === 'p').length} poems`).join('; ')}. Upload a new PDF here whenever you add a part.` : 'Upload the PDF once. It stays private to the 2 of you, and ziggy splits it into parts and poems on its own.'}</p>
@@ -1655,6 +1693,7 @@ function viewManage() {
     try { await S.be.deleteXp(Number(b.dataset.unbonus)); S.xp = await S.be.xp(); viewManage(); toast('Removed'); } catch { toast('Didn’t remove. Try again.'); }
   });
   v.querySelectorAll('[data-addreward]').forEach((b) => b.onclick = () => rewardForm(null, b.dataset.addreward));
+  v.querySelectorAll('.given').forEach((el) => el.addEventListener('click', (e) => { const id = e.target.closest('[data-reward]')?.dataset.reward; if (id) rewardForm(S.rewards.find((r) => r.id === Number(id))); }));
   ['#m-level', '#m-special'].forEach((sel) => $(sel)?.addEventListener('click', (e) => { const id = e.target.closest('[data-reward]')?.dataset.reward; if (id) rewardForm(S.rewards.find((r) => r.id === Number(id))); }));
   $('#m-book')?.addEventListener('change', async (e) => {
     const file = e.target.files?.[0]; if (!file) return;
@@ -1702,7 +1741,7 @@ function rewardForm(r, kind = r?.kind) {
   let tier = r?.tier || 'black';
   const label = kind === 'level' ? 'reward' : 'treat';
   openSheet(`<h2>${r ? `Edit ${label}` : `Add a ${label}`}</h2>
-    <p class="lead">${kind === 'level' ? `She gets these in order, 1 for every ${XP.perReward} XP.` : 'Given on monthsaries and special days without their own treat.'}</p>
+    <p class="lead">${r?.used_at ? `Already given ${fmt(r.used_at.slice(0, 10), { month: 'long', day: 'numeric' })}. Editing it here doesn’t change the one in her wallet.` : kind === 'level' ? `She gets these in order, 1 for every ${XP.perReward} XP. Each is given once.` : 'Given on monthsaries and special days without their own treat. Each is given once.'}</p>
     <form id="rf">
       <label class="field"><span>What it’s for</span><input name="title" maxlength="40" required value="${esc(r?.title || '')}" placeholder="1 matcha" autocomplete="off"></label>
       <label class="field"><span>Fine print</span><input name="sub" maxlength="70" value="${esc(r?.sub || '')}" placeholder="your milk, my treat" autocomplete="off"></label>
