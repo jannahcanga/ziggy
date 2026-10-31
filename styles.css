@@ -660,3 +660,40 @@ html, body { overscroll-behavior: none; }
 .countries small { font-size: 12px; color: var(--smoke); }
 @media (prefers-reduced-motion: reduce) { .holo, .scan, .disc-top, .beam, .holo-fill { animation: none !important; } }
 .map-note { position: absolute; left: 16px; right: 16px; top: 72px; z-index: 500; margin: 0; font-size: 12px; color: var(--mist); text-align: center; }
+/* update 11: one console, only the hologram slides */
+.console { position: relative; width: min(100%, 360px); margin: 16px auto 0; padding: 18px 16px 22px; border-radius: 30px; display: grid; justify-items: center; text-align: center; cursor: pointer;
+  background: radial-gradient(120% 70% at 50% 100%, rgba(169,143,240,.10), transparent 60%), linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.01));
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.18), inset 0 1px 0 rgba(255,255,255,.16), 0 30px 80px rgba(0,0,0,.6), 0 0 60px rgba(169,143,240,.10); -webkit-tap-highlight-color: transparent; }
+.cs-top { width: 100%; display: flex; justify-content: space-between; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--smoke); }
+.cs-top span:last-child { color: var(--orchid); }
+.cs-stage { width: 100%; margin: 4px 0 -4px; }
+.cs-base { width: 100%; height: auto; display: block; overflow: visible; }
+.cs-text { display: grid; justify-items: center; }
+.cs-text.swap { animation: csIn .5s var(--ease); }
+@keyframes csIn { from { opacity: 0; filter: blur(8px); transform: translateY(6px); } }
+.console .mc-name { font-family: var(--serif); font-size: 38px; line-height: 1.05; letter-spacing: -.01em; margin-top: 4px; }
+.console .mc-sub { font-size: 13px; color: var(--mist); margin-top: 6px; font-weight: 300; }
+.console.is-new .mc-name { color: var(--mist); }
+.cs-rail { position: absolute; left: 16px; right: 16px; top: 37px; bottom: 0; display: flex; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory; scrollbar-width: none;
+  -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain;
+  -webkit-mask-image: linear-gradient(90deg, transparent 6%, #000 30%, #000 70%, transparent 94%); mask-image: linear-gradient(90deg, transparent 6%, #000 30%, #000 70%, transparent 94%); }
+.cs-rail::-webkit-scrollbar { display: none; }
+.cs-slide { --o: 0; --a: 0; flex: 0 0 100%; scroll-snap-align: center; scroll-snap-stop: always; }
+.cs-slide svg { width: 100%; height: auto; display: block; overflow: visible;
+  transform: translateX(calc(var(--o) * -22%)) scale(calc(1 - var(--a) * .35)); transform-origin: 50% 51%; opacity: calc(1 - var(--a) * .9); filter: blur(calc(var(--a) * 3px)); }
+.cs-slide.new .holo-line { stroke-dasharray: 3 4; }
+.cs-slide .holo, .cs-slide .scan, .cs-slide .holo-fill { animation-play-state: paused; }
+.cs-slide.on .holo, .cs-slide.on .scan, .cs-slide.on .holo-fill { animation-play-state: running; }
+#cs-prog { transition: stroke-dasharray .9s var(--ease); }
+.emit.flash { animation: emitFlash .6s var(--ease); }
+@keyframes emitFlash { 0% { opacity: 1; } 35% { opacity: 1; filter: brightness(1.8); } 100% { opacity: 1; } }
+.console.go { animation: go .4s var(--ease) forwards; }
+.map-dots i { cursor: pointer; }
+/* if iOS ever leaves a strip under the tab bar, it's the tab bar's colour instead of black */
+.nav::after { content: ''; position: absolute; left: 0; right: 0; top: 100%; height: 120px; background: #090909; pointer-events: none; }
+/* sharp map */
+.maplibregl-map { font-family: var(--sans); background: #0c0c0c; }
+.maplibregl-ctrl-attrib.maplibregl-compact { background: rgba(0,0,0,.55) !important; color: var(--smoke); }
+.maplibregl-ctrl-attrib a { color: var(--smoke) !important; }
+.maplibregl-ctrl-attrib-button { filter: invert(1) opacity(.5); }
+.maplibregl-marker { cursor: pointer; }

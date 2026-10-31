@@ -100,6 +100,33 @@ window.addEventListener('scroll', () => { if (!document.activeElement?.matches?.
 document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(settlePage, 60); });
 window.visualViewport?.addEventListener('resize', () => setTimeout(settlePage, 150));
 const sheetOpen = () => !!$('#sheet-root').firstChild;
+// iPhone home-screen apps have a bug: right at launch, or after the keyboard closes, iOS can think the screen is
+// shorter than it is, which leaves a black strip under the tab bar. Hiding the page for an instant and showing it
+// again makes iOS measure the screen again. It only runs when the screen really is short, so normally nothing happens.
+const STANDALONE = navigator.standalone === true; // only iPhones/iPads report this
+let tallest = window.innerHeight;
+window.addEventListener('resize', () => { if (!document.activeElement?.matches?.('input, textarea, select')) tallest = Math.max(tallest, window.innerHeight); });
+function shortBy() {
+  const portrait = matchMedia('(orientation: portrait)').matches;
+  const full = Math.max(tallest, STANDALONE && portrait ? screen.height : 0);
+  return full - window.innerHeight;
+}
+function healViewport() {
+  if (!STANDALONE || document.hidden || document.activeElement?.matches?.('input, textarea, select') || shortBy() <= 4) return;
+  const sc = scroller(); if (!sc) return;
+  const st = sc.scrollTop;
+  sc.style.display = 'none'; void sc.offsetHeight; sc.style.display = '';
+  sc.scrollTop = st;
+  setTimeout(() => {
+    if (shortBy() > 4) { const b = document.body; b.style.display = 'none'; void b.offsetHeight; b.style.display = ''; sc.scrollTop = st; }
+    S.map?.resize?.();
+  }, 60);
+}
+const healSoon = () => { setTimeout(healViewport, 180); setTimeout(healViewport, 650); };
+document.addEventListener('focusout', healSoon);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) healSoon(); });
+window.addEventListener('pageshow', healSoon);
+window.visualViewport?.addEventListener('resize', () => { if (!document.activeElement?.matches?.('input, textarea, select')) setTimeout(healViewport, 200); });
 
 /* ================= heads-up for baby Jaa ================= */
 // Sends a notification to the ntfy app on baby Jaa's phone. The topic lives in Supabase settings, never on GitHub.
@@ -995,34 +1022,36 @@ function trips() {
 const tripPlaces = (code) => S.places.filter((p) => placeCountry(p) === code);
 const tripCount = (code) => { const ps = tripPlaces(code).filter((p) => p.status !== 'veto'); return { all: ps.length, been: ps.filter(been).length }; };
 
-// The hologram: the country's outline floating between two silver discs. The base ring fills as you stamp places.
-function holoSVG(uid, d, pct) {
+// The hologram: the country's outline floating between two silver discs.
+// The discs stay put; only the hologram slides when you swipe.
+const HOLO_AT = 'translate(72 70) scale(1.56)';
+function holoSVG(uid, d) {
   const u = 'h' + uid;
   return `<svg viewBox="0 0 300 330" aria-hidden="true">
-    <defs>
-      <clipPath id="${u}c"><path d="${d}" transform="translate(72 70) scale(1.56)"/></clipPath>
-    </defs>
+    <defs><clipPath id="${u}c"><path d="${d}" transform="${HOLO_AT}"/></clipPath></defs>
+    <g class="holo">
+      <path d="${d}" transform="${HOLO_AT}" fill="#a98ff0" opacity=".55" filter="url(#tv-glow)"/>
+      <path class="holo-fill" d="${d}" transform="${HOLO_AT}" fill="url(#tv-fill)" fill-rule="evenodd"/>
+      <g clip-path="url(#${u}c)"><rect class="scan" x="60" y="56" width="180" height="180" fill="url(#tv-scan)"/></g>
+      <path class="holo-line" d="${d}" transform="${HOLO_AT}" fill="none" stroke="#f4f0ff" stroke-width="1" vector-effect="non-scaling-stroke" stroke-linejoin="round" opacity=".9"/>
+    </g>
+  </svg>`;
+}
+const PEDESTAL = `<svg class="cs-base" viewBox="0 0 300 330" aria-hidden="true">
     <path class="beam" d="M84 282 L102 60 L198 60 L216 282 Z" fill="url(#tv-beam)"/>
     <path d="M102 60 L84 282 M198 60 L216 282" stroke="rgba(207,194,255,.14)" stroke-width="1"/>
     <g class="disc-top">
       <path d="M74 42 v8 a76 14 0 0 0 152 0 v-8" fill="url(#tv-edge)"/>
       <ellipse cx="150" cy="42" rx="76" ry="14" fill="url(#tv-lid)"/>
-      <ellipse cx="150" cy="58" rx="48" ry="5" fill="#cbbcff" opacity=".55" filter="url(#tv-blur)"/>
-    </g>
-    <g class="holo">
-      <path d="${d}" transform="translate(72 70) scale(1.56)" fill="#a98ff0" opacity=".55" filter="url(#tv-glow)"/>
-      <path class="holo-fill" d="${d}" transform="translate(72 70) scale(1.56)" fill="url(#tv-fill)" fill-rule="evenodd"/>
-      <g clip-path="url(#${u}c)"><rect class="scan" x="60" y="56" width="180" height="180" fill="url(#tv-scan)"/></g>
-      <path d="${d}" transform="translate(72 70) scale(1.56)" fill="none" stroke="#f4f0ff" stroke-width="1" vector-effect="non-scaling-stroke" stroke-linejoin="round" opacity=".9"/>
+      <ellipse class="emit-top" cx="150" cy="58" rx="48" ry="5" fill="#cbbcff" opacity=".55" filter="url(#tv-blur)"/>
     </g>
     <path d="M40 278 v14 a110 26 0 0 0 220 0 v-14" fill="url(#tv-baseedge)"/>
     <ellipse cx="150" cy="278" rx="110" ry="26" fill="url(#tv-base)"/>
-    <ellipse cx="150" cy="276" rx="74" ry="15" fill="url(#tv-emit)"/>
+    <ellipse class="emit" id="cs-emit" cx="150" cy="276" rx="74" ry="15" fill="url(#tv-emit)"/>
     <ellipse cx="150" cy="278" rx="94" ry="20.5" fill="none" stroke="rgba(0,0,0,.45)" stroke-width="1.2" stroke-dasharray="1 4"/>
     <ellipse cx="150" cy="278" rx="102" ry="23.5" fill="none" stroke="rgba(0,0,0,.25)" stroke-width="2.4"/>
-    ${pct > 0 ? `<ellipse class="prog" cx="150" cy="278" rx="102" ry="23.5" fill="none" stroke="#a98ff0" stroke-width="2.4" pathLength="100" stroke-dasharray="${pct} 100" stroke-linecap="round"/>` : ''}
+    <ellipse class="prog" id="cs-prog" cx="150" cy="278" rx="102" ry="23.5" fill="none" stroke="#a98ff0" stroke-width="2.4" pathLength="100" stroke-dasharray="0 100" stroke-linecap="round"/>
   </svg>`;
-}
 const HOLO_DEFS = `<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
   <radialGradient id="tv-lid" cx="42%" cy="30%" r="80%"><stop offset="0" stop-color="#fbfbfa"/><stop offset=".45" stop-color="#a6a6a4"/><stop offset="1" stop-color="#262626"/></radialGradient>
   <linearGradient id="tv-edge" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9a9a98"/><stop offset="1" stop-color="#1a1a1a"/></linearGradient>
@@ -1049,51 +1078,57 @@ async function viewMaps() {
   const atlas = await loadAtlas();
   if (S.tab !== 'travel' || S.trip) return;
   const list = trips();
+  const slides = [...list.map((t, i) => {
+    const a = atlas.get(t.code), c = tripCount(t.code);
+    return { code: t.code, d: a?.d || 'M50 44a6 6 0 1 0 .1 0Z', no: `Map ${pad(i + 1)}`, tag: c.been ? `${c.been} stamped` : t.code.toUpperCase(),
+      name: t.name || a?.name, sub: c.all ? `${c.all} ${plural(c.all, 'place')}${c.been ? `, ${c.been} been` : ''}` : 'No places yet', pct: c.all ? Math.round(c.been / c.all * 100) : 0 };
+  }), { code: '', d: NEW_D, no: `Map ${pad(list.length + 1)}`, tag: 'New', name: 'Add a country', sub: 'Somewhere we want to go', pct: 0, isNew: true }];
   v.innerHTML = `${HOLO_DEFS}
     <p class="since">Where to next?</p>
     <p class="maps-hint">Choose a map</p>
-    <div class="maps" id="maps">
-      ${list.map((t, i) => { const a = atlas.get(t.code); const c = tripCount(t.code); const pct = c.all ? Math.round(c.been / c.all * 100) : 0;
-        return `<button class="map-card" data-code="${t.code}">
-          <span class="mc-top"><span>Map ${pad(i + 1)}</span><span>${c.been ? `${c.been} stamped` : t.code.toUpperCase()}</span></span>
-          <span class="mc-stage">${holoSVG(t.code, a?.d || 'M50 44a6 6 0 1 0 .1 0Z', pct)}</span>
-          <span class="mc-name">${esc(t.name || a?.name)}</span>
-          <span class="mc-sub">${c.all ? `${c.all} ${plural(c.all, 'place')}${c.been ? `, ${c.been} been` : ''}` : 'No places yet'}</span>
-        </button>`; }).join('')}
-      <button class="map-card new" id="new-map">
-        <span class="mc-top"><span>Map ${pad(list.length + 1)}</span><span>New</span></span>
-        <span class="mc-stage">${holoSVG('new', NEW_D, 0)}</span>
-        <span class="mc-name">Add a country</span>
-        <span class="mc-sub">Somewhere we want to go</span>
-      </button>
+    <div class="console" id="console">
+      <div class="cs-top"><span id="cs-no"></span><span id="cs-tag"></span></div>
+      <div class="cs-stage">${PEDESTAL}</div>
+      <div class="cs-text"><span class="mc-name" id="cs-name"></span><span class="mc-sub" id="cs-sub"></span></div>
+      <div class="cs-rail" id="rail" role="listbox" aria-label="Maps">
+        ${slides.map((s, i) => `<div class="cs-slide ${s.isNew ? 'new' : ''}" role="option" aria-label="${esc(s.name)}" data-i="${i}">${holoSVG(s.code || 'new', s.d)}</div>`).join('')}
+      </div>
     </div>
-    <div class="map-dots" id="map-dots">${[...list, 0].map((_, i) => `<i class="${i === 0 ? 'on' : ''}"></i>`).join('')}</div>
-    <p class="maps-foot">Swipe to choose, tap to open</p>`;
-  const rail = $('#maps'), cards = [...rail.children], dots = [...$('#map-dots').children];
+    <div class="map-dots" id="map-dots">${slides.map(() => '<i></i>').join('')}</div>
+    <p class="maps-foot">Swipe the map to switch, tap to open</p>`;
+  const rail = $('#rail'), cards = [...rail.children], dots = [...$('#map-dots').children];
+  const show = (s, first) => {
+    $('#cs-no').textContent = s.no; $('#cs-tag').textContent = s.tag;
+    $('#cs-name').textContent = s.name; $('#cs-sub').textContent = s.sub;
+    $('#cs-prog').setAttribute('stroke-dasharray', `${s.pct} 100`);
+    $('#console').classList.toggle('is-new', !!s.isNew);
+    if (first) return;
+    const txt = $('.cs-text'); txt.classList.remove('swap'); void txt.offsetWidth; txt.classList.add('swap');
+    const em = $('#cs-emit'); em.classList.remove('flash'); void em.getBoundingClientRect(); em.classList.add('flash');
+  };
   let raf = 0, cur = -1;
-  const paint = () => {
+  const paint = (first) => {
     raf = 0;
-    const mid = rail.scrollLeft + rail.clientWidth / 2;
-    let best = 0, bd = 1e9;
-    cards.forEach((c, i) => {
-      const off = (c.offsetLeft + c.offsetWidth / 2 - mid) / c.offsetWidth;
-      c.style.setProperty('--o', Math.max(-1.4, Math.min(1.4, off)).toFixed(3));
-      c.style.setProperty('--a', Math.min(1, Math.abs(off)).toFixed(3));
-      if (Math.abs(off) < bd) { bd = Math.abs(off); best = i; }
-    });
-    if (best !== cur) { cur = best; cards.forEach((c, i) => c.classList.toggle('on', i === best)); dots.forEach((d, i) => d.classList.toggle('on', i === best)); S.mapIndex = best; if (bd < .2) navigator.vibrate?.(6); }
+    const w = rail.clientWidth || 1, x = rail.scrollLeft / w;
+    cards.forEach((c, i) => { const o = i - x; c.style.setProperty('--o', Math.max(-1.5, Math.min(1.5, o)).toFixed(3)); c.style.setProperty('--a', Math.min(1, Math.abs(o)).toFixed(3)); });
+    const best = Math.max(0, Math.min(cards.length - 1, Math.round(x)));
+    if (best !== cur) {
+      cur = best; S.mapIndex = best;
+      cards.forEach((c, i) => c.classList.toggle('on', i === best)); dots.forEach((d, i) => d.classList.toggle('on', i === best));
+      show(slides[best], first === true); if (first !== true) navigator.vibrate?.(6);
+    }
   };
   rail.addEventListener('scroll', () => { raf ||= requestAnimationFrame(paint); }, { passive: true });
-  const start = Math.min(S.mapIndex ?? 0, cards.length - 1);
-  rail.scrollLeft = cards[start].offsetLeft - (rail.clientWidth - cards[start].offsetWidth) / 2;
-  paint();
-  rail.addEventListener('click', (e) => {
-    const c = e.target.closest('.map-card'); if (!c) return;
-    const i = cards.indexOf(c);
-    if (i !== cur) return rail.scrollTo({ left: c.offsetLeft - (rail.clientWidth - c.offsetWidth) / 2, behavior: 'smooth' });
-    if (c.id === 'new-map') return addCountry();
-    thump(false); c.classList.add('go');
-    setTimeout(() => { S.trip = c.dataset.code; viewTravel(); scroller()?.scrollTo(0, 0); }, 380);
+  rail.style.top = $('.cs-stage').offsetTop + 'px';
+  const start = Math.max(0, Math.min(S.mapIndex ?? 0, cards.length - 1));
+  rail.scrollLeft = start * rail.clientWidth;
+  paint(true);
+  dots.forEach((d, i) => d.addEventListener('click', () => rail.scrollTo({ left: i * rail.clientWidth, behavior: 'smooth' })));
+  $('#console').addEventListener('click', () => {
+    const s = slides[cur]; if (!s) return;
+    if (s.isNew) return addCountry();
+    thump(false); $('#console').classList.add('go');
+    setTimeout(() => { S.trip = s.code; viewTravel(); scroller()?.scrollTo(0, 0); }, 380);
   });
 }
 
@@ -1212,25 +1247,115 @@ async function viewTrip() {
   if (mode !== 'map') { S.map?.remove(); S.map = null; return; }
   $('#locate').onclick = locate;
 
-  try { await loadLeaflet(); } catch { $('#map').innerHTML = '<p class="empty" style="padding:20px">The map couldn’t load. Check your connection. The list still works.</p>'; return; }
-  if (!$('#map')) return;
-  S.map?.remove();
+  S.map?.remove(); S.map = null;
+  const el = $('#map'), token = (S.mapToken = (S.mapToken || 0) + 1);
+  try {
+    const m = await buildMap(el, shown, a);
+    if (token !== S.mapToken || !document.body.contains(el)) { m.remove(); return; }
+    S.map = m;
+  } catch { el.innerHTML = '<p class="empty" style="padding:20px">The map couldn’t load. Check your connection. The list still works.</p>'; }
+}
+
+/* ---------- the map itself ---------- */
+// First choice: a sharp map drawn on the phone (OpenFreeMap's dark style, free, no key), so it stays crisp when you zoom.
+// If that can't start on a phone, the older OpenStreetMap picture map takes over by itself, so there's always a map.
+const VECTOR = {
+  js: 'https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js',
+  css: 'https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css',
+  style: 'https://tiles.openfreemap.org/styles/dark',
+};
+let mlReady;
+function loadMapLibre() {
+  return mlReady ||= new Promise((res, rej) => {
+    const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = VECTOR.css; document.head.appendChild(css);
+    const s = document.createElement('script'); s.src = VECTOR.js; s.onload = res; s.onerror = () => { mlReady = null; rej(); }; document.head.appendChild(s);
+    setTimeout(() => rej(), 15000);
+  });
+}
+let glOK;
+function webgl() {
+  if (glOK === undefined) { try { const g = document.createElement('canvas').getContext('webgl'); glOK = !!g; g?.getExtension('WEBGL_lose_context')?.loseContext(); } catch { glOK = false; } }
+  return glOK;
+}
+function pinEl(p) { const e = document.createElement('span'); e.className = `pin ${pinClass(p)}`; e.innerHTML = been(p) ? TICK : ''; e.title = p.name; return e; }
+function hereEl() { const e = document.createElement('span'); e.className = 'here'; return e; }
+// Where the map starts: all your pins, or the one pin, or the whole country.
+function frame(shown, a, fit, jump) {
+  if (shown.length > 1) { const xs = shown.map((p) => p.lng), ys = shown.map((p) => p.lat); fit([Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)], 14); }
+  else if (shown.length === 1) jump(shown[0].lat, shown[0].lng, 14);
+  else if (a) fit(a.box, 12);
+  else jump(13.7466, 100.5393, 11);
+}
+async function buildMap(el, shown, a) {
+  if (!S.mapFallback && webgl()) {
+    try { return await vectorMap(el, shown, a); }
+    catch { S.mapFallback = true; el.innerHTML = ''; el.className = ''; }
+  }
+  return rasterMap(el, shown, a);
+}
+async function vectorMap(el, shown, a) {
+  await loadMapLibre();
+  const ml = window.maplibregl;
+  return new Promise((res, rej) => {
+    const map = new ml.Map({ container: el, style: VECTOR.style, attributionControl: false, dragRotate: false, pitchWithRotate: false, touchPitch: false, maxPitch: 0, fadeDuration: 120 });
+    map.touchZoomRotate.disableRotation();
+    map.addControl(new ml.AttributionControl({ compact: true }), 'bottom-right');
+    let done = false, styled = false;
+    const fail = () => { if (done) return; done = true; try { map.remove(); } catch {} rej(); };
+    const timer = setTimeout(fail, 12000);
+    map.on('error', () => { if (!styled) fail(); });
+    // Ready as soon as the map's look has arrived; the map pieces fill in as they download.
+    map.once('style.load', () => {
+      styled = true;
+      if (done) return; done = true; clearTimeout(timer);
+      restyle(map);
+      for (const p of shown) {
+        const e = pinEl(p); e.addEventListener('click', (ev) => { ev.stopPropagation(); placeSheet(p); });
+        new ml.Marker({ element: e }).setLngLat([p.lng, p.lat]).addTo(map);
+      }
+      if (S.here) new ml.Marker({ element: hereEl() }).setLngLat([S.here.lng, S.here.lat]).addTo(map);
+      frame(shown, a, (b, max) => map.fitBounds([[b[0], b[1]], [b[2], b[3]]], { padding: 40, maxZoom: max, duration: 0 }), (lat, lng, z) => map.jumpTo({ center: [lng, lat], zoom: z }));
+      res({
+        kind: 'vector',
+        remove: () => map.remove(),
+        resize: () => map.resize(),
+        bounds: () => { const b = map.getBounds(); return [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]; },
+        focus: (lat, lng, z) => map.easeTo({ center: [lng, lat], zoom: z }),
+        onTap: (cb) => { const f = (e) => cb(e.lngLat.lat, e.lngLat.lng); map.once('click', f); return () => map.off('click', f); },
+      });
+    });
+  });
+}
+// English names first (instead of 2 lines of English + Thai), and a hint of ziggy purple in the water.
+function restyle(map) {
+  for (const l of map.getStyle().layers || []) {
+    try {
+      const tf = l.layout?.['text-field'];
+      if (l.type === 'symbol' && tf && JSON.stringify(tf).includes('name')) map.setLayoutProperty(l.id, 'text-field', ['coalesce', ['get', 'name_en'], ['get', 'name:latin'], ['get', 'name']]);
+      if (l.type === 'fill' && /^water/.test(l.id)) map.setPaintProperty(l.id, 'fill-color', '#15121e');
+    } catch {}
+  }
+}
+async function rasterMap(el, shown, a) {
+  await loadLeaflet();
   const L = window.L;
-  const map = L.map('map', { zoomControl: false, attributionControl: true, worldCopyJump: true });
+  const map = L.map(el, { zoomControl: false, attributionControl: true, worldCopyJump: true });
   map.attributionControl.setPrefix(false);
   addTiles(map);
-  const pts = [];
   for (const p of shown) {
-    const icon = L.divIcon({ className: '', html: `<span class="pin ${pinClass(p)}" style="display:block">${been(p) ? TICK : ''}</span>`, iconSize: [16, 16], iconAnchor: [8, 8] });
+    const icon = L.divIcon({ className: '', html: `<span class="pin ${pinClass(p)}" style="display:grid">${been(p) ? TICK : ''}</span>`, iconSize: [16, 16], iconAnchor: [8, 8] });
     L.marker([p.lat, p.lng], { icon, title: p.name, zIndexOffset: been(p) ? -100 : 0 }).addTo(map).on('click', () => placeSheet(p));
-    pts.push([p.lat, p.lng]);
   }
-  if (pts.length > 1) map.fitBounds(pts, { padding: [40, 40], maxZoom: 14 });
-  else if (pts.length === 1) map.setView(pts[0], 14);
-  else if (a) map.fitBounds([[a.box[1], a.box[0]], [a.box[3], a.box[2]]], { padding: [10, 10] });
-  else map.setView([13.7466, 100.5393], 11);
+  frame(shown, a, (b, max) => map.fitBounds([[b[1], b[0]], [b[3], b[2]]], { padding: [40, 40], maxZoom: max }), (lat, lng, z) => map.setView([lat, lng], z));
   if (S.here) showHere(map);
-  S.map = map;
+  return {
+    kind: 'raster',
+    remove: () => map.remove(),
+    resize: () => map.invalidateSize(),
+    bounds: () => { const b = map.getBounds(); return [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]; },
+    focus: (lat, lng, z) => map.setView([lat, lng], z),
+    onTap: (cb) => { const f = (e) => cb(e.latlng.lat, e.latlng.lng); map.once('click', f); return () => map.off('click', f); },
+  };
 }
 
 // Map pictures come from OpenStreetMap (free, no key). If that server ever fails, a second free OpenStreetMap server takes over.
@@ -1257,7 +1382,7 @@ function locate() {
   navigator.geolocation.getCurrentPosition((pos) => {
     b?.classList.remove('busy');
     S.here = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-    viewTrip().then(() => { if (S.map) S.map.setView([S.here.lat, S.here.lng], 15); });
+    viewTrip().then(() => S.map?.focus(S.here.lat, S.here.lng, 15));
     toast('Nearest places first');
   }, () => { b?.classList.remove('busy'); toast('Location is off for ziggy. You can turn it on in Settings.'); }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 });
 }
@@ -1347,8 +1472,8 @@ function addSpot(t) {
       results.innerHTML = '<li class="muted small" style="padding:12px 0">Searching…</li>';
       try {
         // Searches inside this country, favouring whatever part of the map is on screen.
-        const box = S.map ? S.map.getBounds() : null;
-        const vb = box ? `&viewbox=${box.getWest()},${box.getNorth()},${box.getEast()},${box.getSouth()}` : '';
+        const box = S.map ? S.map.bounds() : null;
+        const vb = box ? `&viewbox=${box[0]},${box[3]},${box[2]},${box[1]}` : '';
         const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=8&countrycodes=${t.code}${vb}&q=${encodeURIComponent(q)}`;
         const data = await (await fetch(url, { headers: { 'Accept-Language': 'en' } })).json();
         if (!data.length) { results.innerHTML = `<li class="muted small" style="padding:12px 0">No match in ${esc(t.name)}. Try a shorter name, or drop a pin.</li>`; return; }
@@ -1362,10 +1487,8 @@ function addSpot(t) {
       const hint = document.createElement('div'); hint.className = 'map-hint';
       hint.innerHTML = '<span>Tap the map where it is</span><button class="btn quiet small" style="padding:4px">Cancel</button>';
       wrap.appendChild(hint); wrap.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      const done = () => { hint.remove(); S.map.off('click', onTap); };
-      const onTap = (ev) => { done(); placeForm({ name: '', lat: ev.latlng.lat, lng: ev.latlng.lng, country: t.code }); };
-      hint.querySelector('button').onclick = done;
-      S.map.on('click', onTap);
+      const cancel = S.map.onTap((lat, lng) => { hint.remove(); placeForm({ name: '', lat, lng, country: t.code }); });
+      hint.querySelector('button').onclick = () => { cancel(); hint.remove(); };
     });
   });
 }
@@ -1589,3 +1712,4 @@ function openSettings() {
 }
 
 boot();
+setTimeout(healViewport, 400); setTimeout(healViewport, 1500);
