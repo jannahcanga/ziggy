@@ -63,7 +63,7 @@ function closeSheet() {
   if (!sheet) return;
   document.activeElement?.blur?.();
   sheet.classList.add('closing'); $('.backdrop', root)?.classList.add('closing');
-  setTimeout(() => { if (root.contains(sheet)) { root.innerHTML = ''; scroller()?.classList.remove('locked'); } }, 260);
+  setTimeout(() => { if (root.contains(sheet)) { root.innerHTML = ''; scroller()?.classList.remove('locked'); } settlePage(); }, 260);
 }
 // Pull the sheet down from the top to close it, like a native sheet.
 function dragToClose(sheet) {
@@ -93,6 +93,12 @@ function fitViewport() {
 }
 window.visualViewport?.addEventListener('resize', fitViewport);
 window.visualViewport?.addEventListener('scroll', fitViewport);
+// iPhones can leave the whole page nudged up after the keyboard or a file picker closes, which shows as a gap under the tab bar.
+function settlePage() { if (window.scrollY || document.documentElement.scrollTop || document.body.scrollTop) { window.scrollTo(0, 0); document.documentElement.scrollTop = 0; document.body.scrollTop = 0; } }
+document.addEventListener('focusout', () => setTimeout(settlePage, 120));
+window.addEventListener('scroll', () => { if (!document.activeElement?.matches?.('input, textarea, select')) settlePage(); }, { passive: true });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(settlePage, 60); });
+window.visualViewport?.addEventListener('resize', () => setTimeout(settlePage, 150));
 const sheetOpen = () => !!$('#sheet-root').firstChild;
 
 /* ================= heads-up for baby Jaa ================= */
@@ -855,8 +861,7 @@ function viewUs() {
     </section>`;
   }).join('');
   v.innerHTML = `
-    ${S.settings.since ? `<p class="since">since ${fmt(S.settings.since, { month: 'long', day: 'numeric', year: 'numeric' })}</p>` : ''}
-    <div class="section-head"><h2>Our timeline</h2><button class="btn line small" id="add-moment">Add a moment</button></div>
+    <div class="section-head us-head"><h2>Our timeline</h2><button class="btn line small" id="add-moment">Add a moment</button></div>
     <div class="tl" id="tl">${html || '<p class="empty">Nothing here yet. Add the first moment.</p>'}</div>`;
   $('#add-moment').onclick = () => momentForm();
   $('#tl').onclick = (e) => {
