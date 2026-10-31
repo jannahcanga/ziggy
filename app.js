@@ -1669,19 +1669,19 @@ const foundCount = () => SECRETS.filter((s) => isFound(s.k)).length;
 async function found(k) {
   if (!secretsOn() || isFound(k)) return;
   (S.foundOnce ||= new Set()).add(k);
+  S.chipBusy = true; const token = (S.chipToken = (S.chipToken || 0) + 1);
   const el = $('.secret-glow'); el?.classList.remove('secret-glow');
   const n = foundCount(), before = xpTotal();
   thump(false);
   if (!S.asKC) {
     try { const rows = await S.be.addXp({ who: 'kc', amount: 1, reason: 'found a secret', ref: 'secret:' + k }); S.xp = [...S.xp, ...rows]; } catch {}
   } else S.xp = [...S.xp, { id: -Date.now(), who: 'kc', amount: 1, reason: 'preview', ref: 'secret:' + k }];
-  hideHint();
-  setTimeout(() => toast(n === SECRETS.length ? 'Last secret found. +1 XP' : `Secret ${n} of ${SECRETS.length} found. +1 XP`), k === 'drop' ? 0 : 150);
+  foundChip(n);
   if (S.tab === 'today' && $('#xp') && k !== 'drop') setTimeout(() => animateGain(before, xpTotal()), 500);
   const unlocked = S.asKC ? [] : await grantLevels().catch(() => []);
   if (n === SECRETS.length) setTimeout(allFoundSheet, 2600);
   else if (unlocked.length) setTimeout(() => rewardSheet(unlocked), 2600);
-  setTimeout(secretHints, 900);
+  setTimeout(() => { if (token !== S.chipToken) return; S.chipBusy = false; secretHints(); }, 2600);
 }
 function allFoundSheet() {
   thump(true);
@@ -1690,24 +1690,40 @@ function allFoundSheet() {
     <div class="row"><button class="btn" data-close>Aww</button></div>`, (b) => { b.querySelector('[data-close]').onclick = closeSheet; });
 }
 
-// One soft glow at a time, on the next thing she hasn't tried in the tab she's on, plus a hint from the cat when she arrives.
-let hintTimer;
+// One soft glow at a time, on the next thing she hasn't tried in the tab she's on. The cat's hint stays up
+// until she finds it (or taps the hint away, which hides it for that secret only).
 function secretHints() {
   document.querySelectorAll('.secret-glow').forEach((e) => e.classList.remove('secret-glow'));
-  if (!secretsOn() || $('#sheet-root').firstChild || $('.welcome')) return hideHint();
+  if (S.chipBusy) return;
+  if (!secretsOn() || $('#sheet-root').firstChild || $('.welcome') || $('.reader')) return hideHint();
   const next = SECRETS.find((s) => !isFound(s.k) && (s.tab === '*' || s.tab === S.tab) && (!s.when || s.when()) && $(s.sel));
   if (!next) return hideHint();
   $(next.sel).classList.add('secret-glow');
-  const key = S.tab + (S.trip ? ':trip' : '');
-  if (S.hintShown?.[key] === next.k) return;
-  (S.hintShown ||= {})[key] = next.k;
-  let chip = $('#hint');
-  if (!chip) { chip = document.createElement('button'); chip.id = 'hint'; chip.type = 'button'; chip.className = 'hint-chip'; document.body.appendChild(chip); chip.onclick = hideHint; }
-  chip.innerHTML = `<span class="hc-cat">${catSVG('smug')}</span><span><small>Secret ${foundCount() + 1} of ${SECRETS.length}</small>${esc(next.hint)}</span>`;
-  requestAnimationFrame(() => chip.classList.add('in'));
-  clearTimeout(hintTimer); hintTimer = setTimeout(hideHint, 7000);
+  if (S.hintGone?.has(next.k)) return hideHint();
+  const chip = hintChip();
+  if (chip.dataset.k !== next.k) {
+    chip.dataset.k = next.k;
+    chip.innerHTML = `<span class="hc-cat">${catSVG('smug')}</span><span><small>Secret ${foundCount() + 1} of ${SECRETS.length}</small>${esc(next.hint)}</span><span class="hc-x" aria-label="Hide hint">×</span>`;
+  }
+  requestAnimationFrame(() => { chip.classList.add('in'); document.body.classList.add('has-hint'); document.body.style.setProperty('--hint-h', chip.offsetHeight + 'px'); });
 }
-function hideHint() { const c = $('#hint'); if (c) { c.classList.remove('in'); } }
+function hintChip() {
+  let chip = $('#hint');
+  if (!chip) {
+    chip = document.createElement('button'); chip.id = 'hint'; chip.type = 'button'; chip.className = 'hint-chip'; document.body.appendChild(chip);
+    chip.onclick = () => { if (chip.dataset.k) (S.hintGone ||= new Set()).add(chip.dataset.k); hideHint(); };
+  }
+  return chip;
+}
+// The hint itself celebrates the find, then turns into the next hint, so nothing covers anything.
+function foundChip(n) {
+  const chip = hintChip();
+  chip.dataset.k = '';
+  chip.innerHTML = `<span class="hc-cat">${catSVG('excited')}</span><span><small>Secret ${n} of ${SECRETS.length}</small>${n === SECRETS.length ? 'That’s all of them!' : 'Found it!'} <b class="hc-xp">+1 XP</b></span><span></span>`;
+  chip.classList.add('in', 'found'); document.body.classList.add('has-hint');
+  setTimeout(() => chip.classList.remove('found'), 2400);
+}
+function hideHint() { const c = $('#hint'); if (c) c.classList.remove('in'); document.body.classList.remove('has-hint'); }
 new MutationObserver(() => { clearTimeout(secretHints.t); secretHints.t = setTimeout(secretHints, 450); }).observe(document.getElementById('app'), { childList: true, subtree: true });
 
 function secretsSheet() {

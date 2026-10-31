@@ -778,3 +778,11 @@ html, body { overscroll-behavior: none; }
 .secrets li span svg { width: 13px; height: 13px; }
 .w-ring em { font-style: normal; display: inline-flex; align-items: baseline; }
 .console.secret-glow { animation-duration: 3s !important; }
+/* update 17: hint stays until found; toasts lift above it */
+.hint-chip { grid-template-columns: 38px 1fr 18px; }
+.hc-x { color: var(--smoke); font-size: 18px; line-height: 1; align-self: start; }
+body.has-hint #toast { bottom: calc(var(--nav-h) + var(--safe-b) + 26px + var(--hint-h, 64px)); }
+#toast { transition: opacity .3s, transform .3s, bottom .35s var(--ease); }
+.hint-chip.found { box-shadow: inset 0 0 0 1px rgba(169,143,240,.7), 0 0 30px rgba(169,143,240,.35), 0 14px 40px rgba(0,0,0,.6); animation: chipPop .5s var(--ease); }
+@keyframes chipPop { 0% { transform: translate(-50%, 0) scale(.96); } 50% { transform: translate(-50%, 0) scale(1.03); } 100% { transform: translate(-50%, 0) scale(1); } }
+.hc-xp { color: var(--orchid); font-weight: 450; margin-left: 4px; }
