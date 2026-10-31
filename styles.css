@@ -697,3 +697,18 @@ html, body { overscroll-behavior: none; }
 .maplibregl-ctrl-attrib a { color: var(--smoke) !important; }
 .maplibregl-ctrl-attrib-button { filter: invert(1) opacity(.5); }
 .maplibregl-marker { cursor: pointer; }
+/* update 13 */
+.gate-hello h1 { font-size: 24px; font-weight: 300; color: var(--mist); letter-spacing: -.01em; }
+.gate-hello p { font-size: 15px; color: var(--smoke); margin-top: 6px; }
+.results .mine { color: var(--orchid); }
+.picker { position: absolute; inset: 0; z-index: 600; pointer-events: none; }
+.cross { position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; margin: -22px 0 0 -11px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg);
+  background: var(--chalk); box-shadow: 0 0 0 3px rgba(0,0,0,.55), 0 0 18px rgba(255,255,255,.5); }
+.cross::after { content: ''; position: absolute; left: 7px; top: 7px; width: 8px; height: 8px; border-radius: 50%; background: var(--orchid); }
+.picker::after { content: ''; position: absolute; left: 50%; top: 50%; width: 10px; height: 4px; margin: -2px 0 0 -5px; border-radius: 50%; background: rgba(0,0,0,.6); }
+.pick-bar { pointer-events: auto; position: absolute; left: 12px; right: 12px; bottom: 12px; border-radius: 18px; padding: 12px 12px 12px 16px; display: grid; gap: 10px; font-size: 14px;
+  background: rgba(20,20,20,.72); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); box-shadow: var(--glass-edge); }
+.pick-btns { display: flex; justify-content: flex-end; gap: 8px; }
+.picking .map-add, .picking .map-btn { display: none; }
+.row .search { width: auto; min-width: 0; flex: 1 1 auto; }
+.row .search + .btn { flex: none; }

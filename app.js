@@ -286,6 +286,10 @@ async function unlock() {
   app.innerHTML = '<div class="loading"><img src="brand/tulip-chalk-transparent.png" alt="ziggy"></div>';
   try { await loadAll(); } catch (e) { return renderMessage('Couldn’t load', e.message); }
   S.unlocked = true;
+  if (S.me.who === 'jaa' && !PREVIEW) { // XP left behind by places that were deleted before update 13
+    const gone = S.xp.filter((x) => x.ref?.startsWith('place:') && !S.places.some((p) => x.ref === 'place:' + p.id)).map((x) => Number(x.ref.slice(6)));
+    if (gone.length) dropPlaceXp(gone).catch(() => {});
+  }
   if (params.get('view') === 'kc' && S.me.who === 'jaa' && !S.asKC) enterKC(false);
   renderApp();
   if (S.me.who === 'kc' && !S.asKC && !PREVIEW) grantLevels().then((u) => { if (u.length) setTimeout(() => rewardSheet(u), 3800); }).catch(() => {});
@@ -1165,13 +1169,14 @@ function tripMore(t, ps) {
     <p class="lead">${ps.length ? `${ps.length} ${plural(ps.length, 'place')} on this map.` : 'No places on this map yet.'}</p>
     <div class="stack-y">
       ${isReal ? `<button class="btn danger" id="rm">Remove this map</button>
-      <p class="muted small" style="margin:0">${ps.length ? 'This also deletes its places. Any XP from places you’ve been to stays.' : 'You can add it back any time.'}</p>` : '<p class="muted small" style="margin:0">This map is here because it has places. It goes away when they do.</p>'}
+      <p class="muted small" style="margin:0">${ps.length ? 'This also deletes its places, and XP from ones you stamped goes back.' : 'You can add it back any time.'}</p>` : '<p class="muted small" style="margin:0">This map is here because it has places. It goes away when they do.</p>'}
     </div>`, (b) => {
     const rm = b.querySelector('#rm'); if (!rm) return;
     rm.onclick = async () => {
       if (!rm.dataset.sure) { rm.dataset.sure = '1'; rm.textContent = ps.length ? `Tap again: delete map and ${ps.length} ${plural(ps.length, 'place')}` : 'Tap again to remove'; return; }
       try {
         for (const p of ps) await S.be.deletePlace(p.id);
+        await dropPlaceXp(ps.map((p) => p.id));
         await S.be.deleteCountry(t.id);
         [S.countries, S.places] = await Promise.all([S.be.countries(), S.be.places()]);
         S.trip = null; S.mapIndex = 0; closeSheet(); viewTravel(); toast('Map removed');
@@ -1317,6 +1322,7 @@ async function vectorMap(el, shown, a) {
         resize: () => map.resize(),
         bounds: () => { const b = map.getBounds(); return [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]; },
         focus: (lat, lng, z) => map.easeTo({ center: [lng, lat], zoom: z }),
+        center: () => { const c = map.getCenter().wrap(); return [c.lat, c.lng]; },
         onTap: (cb) => { const f = (e) => cb(e.lngLat.lat, e.lngLat.lng); map.once('click', f); return () => map.off('click', f); },
       });
     });
@@ -1350,6 +1356,7 @@ async function rasterMap(el, shown, a) {
     resize: () => map.invalidateSize(),
     bounds: () => { const b = map.getBounds(); return [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]; },
     focus: (lat, lng, z) => map.setView([lat, lng], z),
+    center: () => { const c = map.getCenter().wrap(); return [c.lat, c.lng]; },
     onTap: (cb) => { const f = (e) => cb(e.latlng.lat, e.latlng.lng); map.once('click', f); return () => map.off('click', f); },
   };
 }
@@ -1448,45 +1455,105 @@ function placeSheet(p) {
     b.querySelector('#edit').onclick = () => placeForm(p);
     const del = b.querySelector('#del');
     del.onclick = async () => {
-      if (!del.dataset.sure) { del.dataset.sure = '1'; del.textContent = 'Tap again to delete'; return; }
-      try { await S.be.deletePlace(p.id); S.places = await S.be.places(); closeSheet(); viewTrip(); toast('Removed'); } catch { toast('Didn’t delete. Try again.'); }
+      if (!del.dataset.sure) { del.dataset.sure = '1'; del.textContent = been(p) ? `Tap again to delete (the ${TRAVEL_XP} XP goes back)` : 'Tap again to delete'; return; }
+      try { await S.be.deletePlace(p.id); const back = await dropPlaceXp([p.id]); S.places = await S.be.places(); closeSheet(); viewTrip(); toast(back ? `Removed. The ${back} XP went back.` : 'Removed'); } catch { toast('Didn’t delete. Try again.'); }
     };
   });
 }
 
+// Finding a place: 2 free searches of OpenStreetMap at once (Photon is forgiving with spelling, Nominatim is precise).
+// Small cafés are often missing from OpenStreetMap, so you can always place the pin yourself.
+const POI = /^(amenity|shop|tourism|leisure|building|office|craft|historic|club|healthcare|sport)$/;
+function readCoords(q) { // pasted numbers or a full Google/Apple Maps link
+  const g = q.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/) || q.match(/(-?\d{1,2}\.\d{3,})\s*,\s*(-?\d{1,3}\.\d{3,})/);
+  if (!g) return null;
+  const lat = Number(g[1]), lng = Number(g[2]);
+  return Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? { lat, lng } : null;
+}
+async function findPlaces(q, t) {
+  const box = S.map ? S.map.bounds() : null, mid = box ? [(box[1] + box[3]) / 2, (box[0] + box[2]) / 2] : null;
+  const a = (await loadAtlas()).get(t.code);
+  const pb = a && a.box[2] <= 180 ? `&bbox=${a.box.join(',')}` : '';
+  const photon = fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=10&lang=en${mid ? `&lat=${mid[0]}&lon=${mid[1]}` : ''}${pb}`).then((r) => r.json())
+    .then((j) => (j.features || []).filter((f) => (f.properties.countrycode || '').toLowerCase() === t.code).map((f) => {
+      const p = f.properties;
+      return { name: p.name || p.street || q, sub: [p.street && p.street !== p.name ? p.street : '', p.district || p.locality, p.city || p.county].filter(Boolean).join(', '),
+        lat: f.geometry.coordinates[1], lng: f.geometry.coordinates[0], poi: POI.test(p.osm_key || '') };
+    }));
+  const vb = box ? `&viewbox=${box[0]},${box[3]},${box[2]},${box[1]}` : '';
+  const nomi = fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=8&countrycodes=${t.code}${vb}&q=${encodeURIComponent(q)}`, { headers: { 'Accept-Language': 'en' } }).then((r) => r.json())
+    .then((d) => d.map((r) => { const parts = r.display_name.split(', '); return { name: r.name || parts[0], sub: parts.slice(1, 4).join(', '), lat: Number(r.lat), lng: Number(r.lon), poi: POI.test(r.category || '') }; }));
+  const got = await Promise.allSettled([photon, nomi]);
+  if (got.every((g) => g.status === 'rejected')) throw new Error('search down');
+  const out = [];
+  for (const r of got.flatMap((g) => g.status === 'fulfilled' ? g.value : [])) {
+    if (!out.some((o) => o.name.toLowerCase() === r.name.toLowerCase() && Math.abs(o.lat - r.lat) < .003 && Math.abs(o.lng - r.lng) < .003)) out.push(r);
+  }
+  return out.slice(0, 10);
+}
+
 function addSpot(t) {
-  openSheet(`<h2>Add a place</h2><p class="lead">Search the name from the TikTok, then pick the right one.</p>
+  openSheet(`<h2>Add a place</h2><p class="lead">Search the name from the TikTok. If it isn’t there, you can place the pin yourself.</p>
     <form id="sf" class="stack-y">
-      <div class="row"><input class="search" name="q" required placeholder="e.g. a café, a market, a street" autofocus style="flex:1"><button class="btn small" type="submit">Search</button></div>
+      <div class="row"><input class="search" name="q" required placeholder="A name, a street, or a Maps link" autofocus style="flex:1"><button class="btn small" type="submit">Search</button></div>
     </form>
     <ul class="results" id="results"></ul>
-    ${S.map ? '<div class="row"><button class="btn quiet" id="drop-pin">Can’t find it? Drop a pin on the map instead</button></div>' : '<p class="muted small">Can’t find it? Switch to Map and drop a pin.</p>'}`, (b) => {
+    <div class="row"><button class="btn quiet" id="drop-pin">Place the pin myself</button></div>`, (b) => {
     const results = b.querySelector('#results');
+    let q = '';
     b.querySelector('#sf').onsubmit = async (e) => {
       e.preventDefault();
-      const q = new FormData(e.target).get('q').trim();
+      q = new FormData(e.target).get('q').trim();
+      const at = readCoords(q);
+      if (at) return pinPicker(t, { ...at, name: '' });
+      if (/maps\.app\.goo\.gl|goo\.gl\/maps|maps\.apple\/p/i.test(q)) {
+        results.innerHTML = '<li class="muted small" style="padding:12px 0">Short share links can’t be opened here. Type the name instead, or in Google Maps press and hold the spot, copy the 2 numbers it shows, and paste those.</li>'; return;
+      }
+      b.querySelector('#drop-pin').parentElement.hidden = true;
       results.innerHTML = '<li class="muted small" style="padding:12px 0">Searching…</li>';
-      try {
-        // Searches inside this country, favouring whatever part of the map is on screen.
-        const box = S.map ? S.map.bounds() : null;
-        const vb = box ? `&viewbox=${box[0]},${box[3]},${box[2]},${box[1]}` : '';
-        const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=8&countrycodes=${t.code}${vb}&q=${encodeURIComponent(q)}`;
-        const data = await (await fetch(url, { headers: { 'Accept-Language': 'en' } })).json();
-        if (!data.length) { results.innerHTML = `<li class="muted small" style="padding:12px 0">No match in ${esc(t.name)}. Try a shorter name, or drop a pin.</li>`; return; }
-        results.innerHTML = data.map((r, i) => { const parts = r.display_name.split(', '); return `<li><button data-i="${i}">${esc(r.name || parts[0])}<small>${esc(parts.slice(1, 4).join(', '))}</small></button></li>`; }).join('');
-        results.onclick = (ev) => { const i = ev.target.closest('button')?.dataset.i; if (i == null) return; const r = data[i]; placeForm({ name: r.name || r.display_name.split(', ')[0], lat: Number(r.lat), lng: Number(r.lon), country: t.code }); };
-      } catch { results.innerHTML = '<li class="muted small" style="padding:12px 0">Search isn’t working right now. Drop a pin instead.</li>'; }
+      let data;
+      try { data = await findPlaces(q, t); }
+      catch { results.innerHTML = `<li class="muted small" style="padding:12px 0">Search isn’t working right now.</li>${mineRow(q)}`; return; }
+      results.innerHTML = (data.length ? data.map((r, i) => `<li><button data-i="${i}">${esc(r.name)}<small>${esc(r.sub)}${r.poi ? '' : `${r.sub ? '. ' : ''}You’ll place the pin`}</small></button></li>`).join('')
+        : `<li class="muted small" style="padding:12px 0">Not on the map yet. Lots of small places aren’t, so place it yourself.</li>`) + mineRow(q);
+      results.onclick = (ev) => {
+        const btn = ev.target.closest('button'); if (!btn) return;
+        if (btn.dataset.mine != null) return pinPicker(t, { name: q });
+        const r = data[btn.dataset.i];
+        // a real place goes straight to the form; a street or area opens the pin, named with what you typed
+        if (r.poi) placeForm({ name: r.name, lat: r.lat, lng: r.lng, country: t.code });
+        else pinPicker(t, { lat: r.lat, lng: r.lng, name: q });
+      };
     };
-    b.querySelector('#drop-pin')?.addEventListener('click', () => {
-      closeSheet();
-      const wrap = $('.map-wrap'); if (!wrap || !S.map) return;
-      const hint = document.createElement('div'); hint.className = 'map-hint';
-      hint.innerHTML = '<span>Tap the map where it is</span><button class="btn quiet small" style="padding:4px">Cancel</button>';
-      wrap.appendChild(hint); wrap.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      const cancel = S.map.onTap((lat, lng) => { hint.remove(); placeForm({ name: '', lat, lng, country: t.code }); });
-      hint.querySelector('button').onclick = () => { cancel(); hint.remove(); };
-    });
+    b.querySelector('#drop-pin').onclick = () => pinPicker(t, { name: q });
   });
+}
+const mineRow = (q) => `<li><button data-mine class="mine">Place “${esc(q)}” myself<small>Pick the spot on the map</small></button></li>`;
+
+// Move the map under a fixed pin, then "Pin it here". Easier on a phone than tapping an exact spot.
+async function pinPicker(t, { lat = null, lng = null, name = '' } = {}) {
+  closeSheet();
+  if (!S.map) { S.tripMode = 'map'; try { localStorage.setItem('ziggy-trip-mode', 'map'); } catch {} await viewTrip(); }
+  const wrap = $('.map-wrap');
+  if (!S.map || !wrap) return toast('The map isn’t loading right now, so pins can’t be placed');
+  if (lat != null) S.map.focus(lat, lng, 17);
+  wrap.querySelector('.picker')?.remove();
+  const ui = document.createElement('div'); ui.className = 'picker';
+  ui.innerHTML = `<span class="cross" aria-hidden="true"></span>
+    <div class="pick-bar"><span>Move the map so the pin sits on the spot</span><div class="pick-btns"><button class="btn quiet small" data-x>Cancel</button><button class="btn small" data-ok>Pin it here</button></div></div>`;
+  wrap.appendChild(ui); wrap.classList.add('picking');
+  setTimeout(() => wrap.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300);
+  const end = () => { ui.remove(); wrap.classList.remove('picking'); };
+  ui.querySelector('[data-x]').onclick = end;
+  ui.querySelector('[data-ok]').onclick = () => { const [la, ln] = S.map.center(); end(); placeForm({ name, lat: la, lng: ln, country: t.code }); };
+}
+
+// Deleting a place you'd stamped takes its XP back too.
+async function dropPlaceXp(ids) {
+  const rows = S.xp.filter((x) => ids.some((id) => x.ref === 'place:' + id));
+  for (const r of rows) await S.be.deleteXp(r.id);
+  if (rows.length) S.xp = await S.be.xp();
+  return rows.reduce((n, r) => n + r.amount, 0);
 }
 
 function placeForm(p) {
