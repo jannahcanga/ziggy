@@ -828,24 +828,46 @@ function issueVoucher() {
 }
 
 /* ================= us: timeline ================= */
+function closedYears() { try { return new Set(JSON.parse(localStorage.getItem('ziggy-tl-closed') || '[]')); } catch { return new Set(); } }
 function viewUs() {
   const v = $('#view');
   const items = S.timeline.slice().sort((a, b) => a.happened_on.localeCompare(b.happened_on) || a.id - b.id);
-  let html = '', year = null, nowPlaced = false;
-  for (const m of items) {
-    if (!nowPlaced && m.happened_on > TODAY) { html += `<p class="tl-now">today</p>`; nowPlaced = true; }
-    const y = m.happened_on.slice(0, 4);
-    if (y !== year) { html += `<div class="tl-year" aria-hidden="false">${y}</div>`; year = y; }
+  const groups = [];
+  for (const m of items) { const y = m.happened_on.slice(0, 4); if (groups.at(-1)?.y !== y) groups.push({ y, items: [] }); groups.at(-1).items.push(m); }
+  const closed = closedYears();
+  let nowPlaced = false;
+  const now = '<p class="tl-now">today</p>';
+  const item = (m) => {
     const when = m.precision === 'month' ? fmt(m.happened_on, { month: 'short' }) : fmt(m.happened_on, { month: 'short', day: 'numeric' });
-    html += `<button class="tl-item" data-id="${m.id}"><span class="when">${when}</span><span><h3>${esc(m.title)}</h3>${m.note ? `<p>${esc(m.note)}</p>` : ''}${m.added_by && m.added_by !== 'jaa' ? `<div class="by">added by ${esc(name(m.added_by))}</div>` : ''}</span></button>`;
-  }
-  if (!nowPlaced && items.length) html += `<p class="tl-now">today</p>`;
+    return `<button class="tl-item" type="button" data-id="${m.id}"><span class="when">${when}</span><span><h3>${esc(m.title)}</h3>${m.note ? `<p>${esc(m.note)}</p>` : ''}${m.added_by && m.added_by !== 'jaa' ? `<div class="by">added by ${esc(name(m.added_by))}</div>` : ''}</span></button>`;
+  };
+  const html = groups.map((g, gi) => {
+    let inner = '';
+    for (const m of g.items) { if (!nowPlaced && m.happened_on > TODAY) { inner += now; nowPlaced = true; } inner += item(m); }
+    if (!nowPlaced && gi === groups.length - 1) { inner += now; nowPlaced = true; }
+    const shut = closed.has(g.y);
+    return `<section class="tl-group${shut ? ' closed' : ''}" data-year="${g.y}">
+      <button class="tl-year" type="button" aria-expanded="${!shut}"><span>${g.y}</span><small>${g.items.length} ${plural(g.items.length, 'moment')}</small><i class="chev" aria-hidden="true"></i></button>
+      <div class="tl-items"><div>${inner}</div></div>
+    </section>`;
+  }).join('');
   v.innerHTML = `
     ${S.settings.since ? `<p class="since">since ${fmt(S.settings.since, { month: 'long', day: 'numeric', year: 'numeric' })}</p>` : ''}
     <div class="section-head"><h2>Our timeline</h2><button class="btn line small" id="add-moment">Add a moment</button></div>
     <div class="tl" id="tl">${html || '<p class="empty">Nothing here yet. Add the first moment.</p>'}</div>`;
   $('#add-moment').onclick = () => momentForm();
-  $('#tl').onclick = (e) => { const id = e.target.closest('.tl-item')?.dataset.id; if (id) momentForm(S.timeline.find((m) => m.id === Number(id))); };
+  $('#tl').onclick = (e) => {
+    const yr = e.target.closest('.tl-year');
+    if (yr) {
+      const g = yr.parentElement, y = g.dataset.year, set = closedYears();
+      const shut = !g.classList.contains('closed');
+      g.classList.toggle('closed', shut); yr.setAttribute('aria-expanded', String(!shut));
+      shut ? set.add(y) : set.delete(y);
+      try { localStorage.setItem('ziggy-tl-closed', JSON.stringify([...set])); } catch {}
+      thump(false); return;
+    }
+    const id = e.target.closest('.tl-item')?.dataset.id; if (id) momentForm(S.timeline.find((m) => m.id === Number(id)));
+  };
 }
 function momentForm(m) {
   const editing = !!m;
