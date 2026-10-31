@@ -146,6 +146,7 @@ setInterval(() => {
 /* ================= boot ================= */
 async function boot() {
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+  if (needsInstall()) return renderInstall();
   app.innerHTML = '<div class="loading"><img src="brand/tulip-chalk-transparent.png" alt="ziggy"></div>';
   try {
     if (CONFIG.supabaseUrl && CONFIG.supabaseKey) {
@@ -292,6 +293,7 @@ async function unlock() {
   }
   if (params.get('view') === 'kc' && S.me.who === 'jaa' && !S.asKC) enterKC(false);
   renderApp();
+  maybeWelcome();
   if (S.me.who === 'kc' && !S.asKC && !PREVIEW) grantLevels().then((u) => { if (u.length) setTimeout(() => rewardSheet(u), 3800); }).catch(() => {});
 }
 /* ================= baby KC's view, for baby Jaa ================= */
@@ -308,12 +310,13 @@ function enterKC(render = true) {
   S.be = readOnly(S.realBe); S.asKC = true; S.replay = false; S.openedLocal = null;
   if (S.tab === 'manage') S.tab = 'today';
   document.body.classList.add('as-kc');
+  S.welcomed = true;
   if (render) { renderApp(); scroller()?.scrollTo(0, 0); toast(`You’re seeing ziggy as ${name('kc')} sees it`); }
 }
 async function exitKC() {
   if (params.get('view') || params.get('date')) { location.href = location.pathname; return; }
   S.me = S.realMe; S.be = S.realBe; S.partner = S.members.find((m) => m !== S.me);
-  S.realMe = null; S.asKC = false; S.replay = false; S.openedLocal = null;
+  S.realMe = null; S.asKC = false; S.replay = false; S.openedLocal = null; S.foundOnce = new Set(); hideHint();
   document.body.classList.remove('as-kc');
   try { await loadAll(); } catch {}
   renderApp(); scroller()?.scrollTo(0, 0); toast('Back to your view');
@@ -332,6 +335,7 @@ function kcViewSheet() {
     <p class="lead">This is exactly what she sees, with her real XP, wallet and drop. Nothing you tap here saves or counts for her, and you won’t get notifications.</p>
     <div class="stack-y">
       <button class="btn line" id="kv-replay" type="button">Replay today’s drop</button>
+      <button class="btn line" id="kv-welcome" type="button">Replay her welcome</button>
       <div class="field"><span>See another day</span><div class="row"><input type="date" id="kv-date" value="${esc(PREVIEW || TODAY)}" style="flex:1"><button class="btn line small" id="kv-go" type="button">Go</button></div></div>
       <p class="muted small" style="margin:0">Hidden from her: To deliver, Coming up, Special days, Issue a voucher, Manage ziggy.</p>
       <button class="btn" id="kv-exit" type="button">Back to my view</button>
@@ -339,6 +343,7 @@ function kcViewSheet() {
     b.querySelector('#kv-replay').onclick = () => { S.replay = true; S.openedLocal = null; S.tab = 'today'; closeSheet(); renderApp(); scroller()?.scrollTo(0, 0); };
     b.querySelector('#kv-go').onclick = () => { const d = b.querySelector('#kv-date').value; if (d) location.href = `${location.pathname}?view=kc&date=${d}`; };
     b.querySelector('#kv-exit').onclick = () => { closeSheet(); exitKC(); };
+    b.querySelector('#kv-welcome').onclick = () => { closeSheet(); S.replayWelcome = true; S.foundOnce = new Set(); setTimeout(maybeWelcome, 300); };
   });
 }
 
@@ -439,7 +444,7 @@ function showFace(i) {
 }
 function bindCounter() {
   const btn = $('#together'); if (!btn) return;
-  btn.onclick = () => { S.pauseUntil = Date.now() + 15000; showFace(S.face + 1); };
+  btn.onclick = () => { S.pauseUntil = Date.now() + 15000; showFace(S.face + 1); found('counter'); };
 }
 // switches every 5 seconds; a tap moves it along and pauses the switching for 15 seconds
 setInterval(() => {
@@ -660,6 +665,13 @@ function viewToday() {
     const into = Number($('#xp')?.style.getPropertyValue('--p')) || 0, rest = idleFace(into);
     const pick = EXPRESSIONS.filter((e) => e !== rest && e !== $('#xp-cat .cat')?.dataset.expr);
     setCat(pick[Math.floor(Math.random() * pick.length)], 1900, 'boop'); thump(false);
+    found('boop');
+  });
+  $('.xp-gift')?.addEventListener('click', (e) => {
+    const g = e.currentTarget; g.classList.remove('shake'); void g.offsetWidth; g.classList.add('shake'); thump(false);
+    const at = (Math.floor(xpTotal() / XP.perReward) + 1) * XP.perReward;
+    toast(S.me.who === 'kc' ? `Something’s waiting at ${at} XP. The cat won’t say what.` : `Her next reward is at ${at} XP`);
+    setTimeout(() => found('gift'), 1600);
   });
   $('#add-day')?.addEventListener('click', () => dayForm());
   $('#low-go')?.addEventListener('click', () => { S.tab = 'manage'; renderApp(); scroller()?.scrollTo(0, 0); });
@@ -693,6 +705,7 @@ function viewToday() {
       $('#stage').innerHTML = dropCardHTML(sp);
       if (gained) { animateGain(before, xpTotal()); renderNavBadges(); }
       if (unlocked.length) setTimeout(() => rewardSheet(unlocked), 3600);
+      setTimeout(() => found('drop'), gained ? 3400 : 700);
     }, 1450);
   };
 }
@@ -835,7 +848,9 @@ function viewWallet() {
       const wrap = e.target.closest('.vbtn')?.parentElement;
       if (!wrap) return;
       thump(false);
+      const was = wrap.classList.contains('open');
       [...cards.children].forEach((w) => w.classList.toggle('open', w === wrap));
+      if (!was) found('wallet');
     };
   }
   $('#coming')?.addEventListener('click', async (e) => {
@@ -927,7 +942,7 @@ function viewUs() {
       g.classList.toggle('closed', shut); yr.setAttribute('aria-expanded', String(!shut));
       shut ? set.add(y) : set.delete(y);
       try { localStorage.setItem('ziggy-tl-closed', JSON.stringify([...set])); } catch {}
-      thump(false); return;
+      thump(false); found('year'); return;
     }
     const rd = e.target.closest('[data-read]');
     if (rd) return openBook(Number(rd.dataset.read));
@@ -985,6 +1000,7 @@ async function openBook(part) {
     },
     onClose: async () => {
       scroller()?.classList.remove('locked');
+      setTimeout(() => found('poem'), 400);
       if (S.tab === 'us') viewUs();
       if (gained && isKC) {
         toast(`+${gained} XP for reading`);
@@ -1144,7 +1160,7 @@ async function viewMaps() {
     if (best !== cur) {
       cur = best; S.mapIndex = best;
       cards.forEach((c, i) => c.classList.toggle('on', i === best)); dots.forEach((d, i) => d.classList.toggle('on', i === best));
-      show(slides[best], first === true); if (first !== true) navigator.vibrate?.(6);
+      show(slides[best], first === true); if (first !== true) { navigator.vibrate?.(6); found('swipe'); }
     }
   };
   rail.addEventListener('scroll', () => { raf ||= requestAnimationFrame(paint); }, { passive: true });
@@ -1155,7 +1171,7 @@ async function viewMaps() {
   $('#console').addEventListener('click', () => {
     const s = slides[cur]; if (!s) return;
     if (s.isNew) return addCountry();
-    thump(false); $('#console').classList.add('go');
+    thump(false); $('#console').classList.add('go'); found('map');
     setTimeout(() => { S.trip = s.code; viewTravel(); scroller()?.scrollTo(0, 0); }, 380);
   });
 }
@@ -1265,7 +1281,7 @@ async function viewTrip() {
 
   $('#trip-back').onclick = () => { S.trip = null; S.here = null; thump(false); viewTravel(); scroller()?.scrollTo(0, 0); };
   $('#trip-more').onclick = () => tripMore(t, all);
-  $('#mode').onclick = (e) => { const m = e.target.closest('button')?.dataset.m; if (!m || m === mode) return; S.tripMode = m; try { localStorage.setItem('ziggy-trip-mode', m); } catch {} viewTrip(); };
+  $('#mode').onclick = (e) => { const m = e.target.closest('button')?.dataset.m; if (!m || m === mode) return; if (m === 'list') found('list'); S.tripMode = m; try { localStorage.setItem('ziggy-trip-mode', m); } catch {} viewTrip(); };
   $('#add-spot').onclick = () => addSpot(t);
   $('#unnear')?.addEventListener('click', () => { S.here = null; viewTrip(); });
   $('#chips')?.addEventListener('click', (e) => { const k = e.target.closest('.chip')?.dataset.c; if (k) { S.catFilter = k; viewTrip(); } });
@@ -1609,6 +1625,134 @@ function placeForm(p) {
   });
 }
 
+/* ================= getting ziggy on her phone ================= */
+// On an iPhone, ziggy belongs on the Home Screen (full screen, no browser bars). If it's opened in Safari or inside
+// Messenger, a short guide shows first. "Continue in the browser" skips it for this visit.
+const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const IN_APP = /FBAN|FBAV|FB_IAB|FBIOS|Messenger|Instagram|Line\//i.test(navigator.userAgent);
+const needsInstall = () => IOS && !navigator.standalone && !params.get('view') && !sessionStorage.getItem('ziggy-skip-install');
+const SHARE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3M7.5 7.5 12 3l4.5 4.5"/><path d="M8 10H6.5A1.5 1.5 0 0 0 5 11.5v8A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5v-8a1.5 1.5 0 0 0-1.5-1.5H16"/></svg>';
+const PLUS_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M12 8.5v7M8.5 12h7"/></svg>';
+function renderInstall() {
+  const steps = IN_APP
+    ? [['···', 'Tap <b>···</b> at the top right of this screen'], ['↗', 'Choose <b>Open in Safari</b> (or Open in external browser)'], ['✦', 'ziggy opens in Safari, with the next steps']]
+    : [[SHARE_ICON, 'Tap the <b>Share</b> button. On newer iPhones it’s inside the <b>···</b> menu at the bottom'], [PLUS_ICON, 'Scroll down and tap <b>Add to Home Screen</b>, then <b>Add</b>'], ['<img src="icons/icon-192.png" alt="">', 'Open <b>ziggy</b> from your Home Screen']];
+  app.innerHTML = `
+  <div class="gate install">
+    <div class="gate-lines" aria-hidden="true"><i class="v1"></i><i class="v2"></i><i class="h1"></i><i class="h2"></i></div>
+    <div class="brand"><img src="brand/tulip-chalk-transparent.png" alt=""><span>ziggy</span></div>
+    <div class="gate-hello"><h1>${IN_APP ? 'Open me in Safari first' : 'Keep me on your Home Screen'}</h1><p>${IN_APP ? 'this app can’t be added from here' : 'so I open full screen, like a real app'}</p></div>
+    <ol class="steps">${steps.map(([i, t]) => `<li><span class="st-i">${i}</span><span>${t}</span></li>`).join('')}</ol>
+    <button class="btn quiet" id="skip-install" type="button">Continue in the browser for now</button>
+  </div>`;
+  $('#skip-install').onclick = () => { try { sessionStorage.setItem('ziggy-skip-install', '1'); } catch {} boot(); };
+}
+
+/* ================= welcome + the secret hunt (baby KC) ================= */
+// 10 little things hidden around ziggy. Each one she finds is +1 XP, and the cat drops hints until she has them all.
+const SECRETS = [
+  { k: 'drop', name: 'Open your daily drop', hint: 'Your drop is waiting. Tap it.', tab: 'today', sel: '#drum' },
+  { k: 'boop', name: 'Boop the cat', hint: 'The cat on your XP bar likes being booped.', tab: 'today', sel: '#xp-cat' },
+  { k: 'gift', name: 'Shake the gift', hint: 'What’s at the end of your XP bar?', tab: 'today', sel: '.xp-gift' },
+  { k: 'counter', name: 'Flip the counter', hint: 'The counter at the top has more than 1 face. Tap it.', tab: '*', sel: '#together' },
+  { k: 'wallet', name: 'Shuffle your wallet', hint: 'Tap a card in the stack to bring it to the front.', tab: 'wallet', sel: '#cards > :not(.open) .vbtn' },
+  { k: 'year', name: 'Fold a year', hint: 'Tap a year on your timeline to fold it away.', tab: 'us', sel: '.tl-year' },
+  { k: 'poem', name: 'Read a poem', hint: 'Some moments on your timeline open into something to read.', tab: 'us', sel: '[data-read]' },
+  { k: 'swipe', name: 'Swipe the maps', hint: 'Swipe the hologram sideways to change the map.', tab: 'travel', sel: '#console', when: () => !S.trip },
+  { k: 'map', name: 'Open a map', hint: 'Tap the hologram to open that country.', tab: 'travel', sel: '#console', when: () => !S.trip && isFound('swipe') },
+  { k: 'list', name: 'Switch to List', hint: 'Every map is a list too. Try the switch at the top.', tab: 'travel', sel: '#mode [aria-pressed="false"]', when: () => !!S.trip },
+];
+const secretsOn = () => S.me?.who === 'kc' && !PREVIEW && S.welcomed;
+const isFound = (k) => S.foundOnce?.has(k) || S.xp.some((x) => x.ref === 'secret:' + k);
+const foundCount = () => SECRETS.filter((s) => isFound(s.k)).length;
+
+async function found(k) {
+  if (!secretsOn() || isFound(k)) return;
+  (S.foundOnce ||= new Set()).add(k);
+  const el = $('.secret-glow'); el?.classList.remove('secret-glow');
+  const n = foundCount(), before = xpTotal();
+  thump(false);
+  if (!S.asKC) {
+    try { const rows = await S.be.addXp({ who: 'kc', amount: 1, reason: 'found a secret', ref: 'secret:' + k }); S.xp = [...S.xp, ...rows]; } catch {}
+  } else S.xp = [...S.xp, { id: -Date.now(), who: 'kc', amount: 1, reason: 'preview', ref: 'secret:' + k }];
+  hideHint();
+  setTimeout(() => toast(n === SECRETS.length ? 'Last secret found. +1 XP' : `Secret ${n} of ${SECRETS.length} found. +1 XP`), k === 'drop' ? 0 : 150);
+  if (S.tab === 'today' && $('#xp') && k !== 'drop') setTimeout(() => animateGain(before, xpTotal()), 500);
+  const unlocked = S.asKC ? [] : await grantLevels().catch(() => []);
+  if (n === SECRETS.length) setTimeout(allFoundSheet, 2600);
+  else if (unlocked.length) setTimeout(() => rewardSheet(unlocked), 2600);
+  setTimeout(secretHints, 900);
+}
+function allFoundSheet() {
+  thump(true);
+  openSheet(`<div class="sheet-cat">${catSVG('love')}</div><h2>All ${SECRETS.length} secrets found</h2>
+    <p class="lead">The cat is impressed. He will never say it out loud. That’s +${SECRETS.length} XP from snooping around.</p>
+    <div class="row"><button class="btn" data-close>Aww</button></div>`, (b) => { b.querySelector('[data-close]').onclick = closeSheet; });
+}
+
+// One soft glow at a time, on the next thing she hasn't tried in the tab she's on, plus a hint from the cat when she arrives.
+let hintTimer;
+function secretHints() {
+  document.querySelectorAll('.secret-glow').forEach((e) => e.classList.remove('secret-glow'));
+  if (!secretsOn() || $('#sheet-root').firstChild || $('.welcome')) return hideHint();
+  const next = SECRETS.find((s) => !isFound(s.k) && (s.tab === '*' || s.tab === S.tab) && (!s.when || s.when()) && $(s.sel));
+  if (!next) return hideHint();
+  $(next.sel).classList.add('secret-glow');
+  const key = S.tab + (S.trip ? ':trip' : '');
+  if (S.hintShown?.[key] === next.k) return;
+  (S.hintShown ||= {})[key] = next.k;
+  let chip = $('#hint');
+  if (!chip) { chip = document.createElement('button'); chip.id = 'hint'; chip.type = 'button'; chip.className = 'hint-chip'; document.body.appendChild(chip); chip.onclick = hideHint; }
+  chip.innerHTML = `<span class="hc-cat">${catSVG('smug')}</span><span><small>Secret ${foundCount() + 1} of ${SECRETS.length}</small>${esc(next.hint)}</span>`;
+  requestAnimationFrame(() => chip.classList.add('in'));
+  clearTimeout(hintTimer); hintTimer = setTimeout(hideHint, 7000);
+}
+function hideHint() { const c = $('#hint'); if (c) { c.classList.remove('in'); } }
+new MutationObserver(() => { clearTimeout(secretHints.t); secretHints.t = setTimeout(secretHints, 450); }).observe(document.getElementById('app'), { childList: true, subtree: true });
+
+function secretsSheet() {
+  const n = foundCount(), next = SECRETS.find((s) => !isFound(s.k));
+  openSheet(`<h2>Secrets</h2><p class="lead">${n === SECRETS.length ? 'You found every single one.' : `${n} of ${SECRETS.length} found. Each one is +1 XP.`}</p>
+    <ul class="secrets">${SECRETS.map((s) => isFound(s.k) ? `<li class="got"><span>${TICK}</span>${esc(s.name)}</li>` : '<li><span></span>???</li>').join('')}</ul>
+    ${next ? `<p class="quote" style="font-size:20px">${esc(next.hint)}</p>` : ''}
+    <div class="row"><button class="btn line" data-close>Close</button></div>`, (b) => { b.querySelector('[data-close]').onclick = closeSheet; });
+}
+
+// The first time she opens ziggy: 3 short cards, then she's on her own (with the cat's hints).
+function maybeWelcome() {
+  if (S.me?.who !== 'kc' || PREVIEW) return;
+  let seen = false; try { seen = !!localStorage.getItem('ziggy-welcome-kc'); } catch {}
+  if (S.asKC ? !S.replayWelcome : (seen || S.xp.some((x) => x.ref.startsWith('secret:')))) { S.welcomed = true; return; }
+  S.replayWelcome = false; S.welcomed = false;
+  showWelcome();
+}
+function showWelcome() {
+  const slides = [
+    `<div class="w-art"><img src="brand/tulip-chalk-transparent.png" alt=""></div><p class="w-kicker">ziggy</p>
+     <h2>Made for you, ${esc(name('kc'))}.</h2><p>A little world for just the 2 of us. Open it every day: there’s always something new waiting.</p>`,
+    `<div class="w-art w-cat">${catSVG('sassy')}</div><p class="w-kicker">Meet the cat</p>
+     <h2>He’s in charge of your XP.</h2><p>Open your drop every day to keep him happy. Every ${XP.perReward} XP, he hands you a reward. It goes straight to your wallet. No asking needed.</p>`,
+    `<div class="w-art w-ring"><span><em>0<small>/${SECRETS.length}</small></em></span></div><p class="w-kicker">One more thing</p>
+     <h2>${SECRETS.length} secrets are hidden in here.</h2><p>Find them all. Each one is +1 XP, and the cat will drop hints along the way.</p>`,
+  ];
+  const w = document.createElement('div'); w.className = 'welcome';
+  w.innerHTML = `<div class="w-track" id="w-track">${slides.map((s) => `<section class="w-slide">${s}</section>`).join('')}</div>
+    <div class="w-foot"><div class="w-dots">${slides.map((_, i) => `<i class="${i ? '' : 'on'}"></i>`).join('')}</div><button class="btn" id="w-next" type="button">Next</button></div>`;
+  document.body.appendChild(w); scroller()?.classList.add('locked');
+  requestAnimationFrame(() => w.classList.add('in'));
+  const track = $('#w-track', w), dots = [...w.querySelectorAll('.w-dots i')], next = $('#w-next', w);
+  const at = () => Math.round(track.scrollLeft / track.clientWidth);
+  track.addEventListener('scroll', () => { const i = at(); dots.forEach((d, j) => d.classList.toggle('on', i === j)); next.textContent = i === slides.length - 1 ? 'Let’s go' : 'Next'; w.classList.toggle('last', i === slides.length - 1); }, { passive: true });
+  next.onclick = () => {
+    const i = at();
+    if (i < slides.length - 1) { thump(false); return track.scrollTo({ left: (i + 1) * track.clientWidth, behavior: 'smooth' }); }
+    thump(true);
+    if (!S.asKC) try { localStorage.setItem('ziggy-welcome-kc', '1'); } catch {}
+    S.welcomed = true; w.classList.add('out'); scroller()?.classList.remove('locked');
+    setTimeout(() => { w.remove(); secretHints(); }, 600);
+  };
+}
+
 /* ================= manage (baby Jaa only) ================= */
 const TIERS = [['black', 'Matte black'], ['chrome', 'Chrome'], ['orchid', 'Purple']];
 function viewManage() {
@@ -1646,6 +1790,8 @@ function viewManage() {
     <p class="muted small" style="margin:0 0 12px">Give ${esc(name('kc'))} extra XP for anything. Her bar fills up the next time she opens ziggy.</p>
     <form class="bonus" id="m-bonus"><input name="amount" type="number" inputmode="numeric" min="1" max="100" value="10" aria-label="XP"><input name="reason" maxlength="60" placeholder="What it’s for" autocomplete="off"><button class="btn small" type="submit">Give</button></form>
     ${bonuses.length ? `<ul class="mlist" id="m-bonuses">${bonuses.map((x) => `<li><div><b>+${x.amount} XP</b><small>${esc(x.reason.replace(/^bonus: ?/, '') || 'bonus')}</small></div><button type="button" class="btn quiet small" data-unbonus="${x.id}">Remove</button></li>`).join('')}</ul>` : ''}
+
+    <p class="note-small" style="margin-top:14px">${esc(name('kc'))}’s secret hunt: ${foundCount()} of ${SECRETS.length} found${foundCount() ? ` (${SECRETS.filter((x) => isFound(x.k)).map((x) => x.name.toLowerCase()).join(', ')})` : ''}.</p>
 
     <div class="section-head"><h2>Rewards every 100 XP</h2><button class="btn line small" type="button" data-addreward="level">Add</button></div>
     <ol class="mlist num" id="m-level">${lq.map((r) => row('data-reward', r.id, r.title, r.sub)).join('')}</ol>
@@ -1787,12 +1933,14 @@ function openSettings() {
       ${S.asKC ? `<button class="btn" id="s-exitkc">Back to my view</button>` : ''}
       ${S.me.who === 'jaa' ? '<button class="btn" id="s-manage">Manage ziggy</button>' : ''}
       ${S.me.who === 'jaa' ? `<button class="btn line" id="s-askc">See ziggy as ${esc(name('kc'))}</button>` : ''}
+      ${S.me.who === 'kc' ? `<button class="btn line" id="s-secrets">Secrets, ${foundCount()} of ${SECRETS.length} found</button>` : ''}
       <button class="btn line" id="s-code">Change code</button>
       <button class="btn line" id="s-backup">Download a backup</button>
       ${S.be.demo ? `<button class="btn line" id="s-as">Demo: view as ${S.me.who === 'jaa' ? esc(name('kc')) : esc(name('jaa'))}</button>` : ''}
       <button class="btn danger" id="s-out">Sign out</button>
     </div>`, (b) => {
     b.querySelector('#s-askc')?.addEventListener('click', () => { closeSheet(); enterKC(); });
+    b.querySelector('#s-secrets')?.addEventListener('click', () => { closeSheet(); setTimeout(secretsSheet, 300); });
     b.querySelector('#s-exitkc')?.addEventListener('click', () => { closeSheet(); exitKC(); });
     if (S.asKC) b.querySelectorAll('#s-code, #s-backup, #s-out').forEach((x) => x.addEventListener('click', (e) => { e.stopImmediatePropagation(); toast(`${name('kc')} would see this. It’s off while you’re looking.`); }, true));
     b.querySelector('#s-manage')?.addEventListener('click', () => { closeSheet(); S.back = S.tab === 'manage' ? 'today' : S.tab; S.tab = 'manage'; renderApp(); scroller()?.scrollTo(0, 0); });
