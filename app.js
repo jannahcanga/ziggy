@@ -23,7 +23,7 @@ function rng(seed) { // small seeded random, same result all day
 }
 const hashId = (n) => Math.imul(Number(n) ^ 0x5bd1e995, 2654435761) >>> 0;
 
-const S = { tab: 'today', unlocked: false, hiddenAt: 0, catFilter: 'all' };
+const S = { tab: 'today', unlocked: false, hiddenAt: 0, catFilter: 'all', countries: [] };
 
 const ICON = {
   gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>',
@@ -254,10 +254,10 @@ function renderSetPin(changing = false) {
 async function loadAll() {
   const be = S.be;
   const soft = (p) => p.catch(() => []); // xp and rewards stay empty until update 3's SQL has run
-  const [settings, words, drops, opens, vouchers, timeline, places, xp, rewards, progress] = await Promise.all([
-    be.settings(), be.words(), be.drops(), be.opens(), be.vouchers(), be.timeline(), be.places(), soft(be.xp()), soft(be.rewards()), soft(be.bookProgress()),
+  const [settings, words, drops, opens, vouchers, timeline, places, xp, rewards, progress, countries] = await Promise.all([
+    be.settings(), be.words(), be.drops(), be.opens(), be.vouchers(), be.timeline(), be.places(), soft(be.xp()), soft(be.rewards()), soft(be.bookProgress()), soft(be.countries()),
   ]);
-  Object.assign(S, { settings, words, drops, opens, vouchers, timeline, places, xp, rewards, progress });
+  Object.assign(S, { settings, words, drops, opens, vouchers, timeline, places, xp, rewards, progress, countries });
 }
 async function unlock() {
   app.innerHTML = '<div class="loading"><img src="brand/tulip-chalk-transparent.png" alt="ziggy"></div>';
@@ -306,7 +306,7 @@ function kcViewSheet() {
     <div class="stack-y">
       <button class="btn line" id="kv-replay" type="button">Replay today’s drop</button>
       <div class="field"><span>See another day</span><div class="row"><input type="date" id="kv-date" value="${esc(PREVIEW || TODAY)}" style="flex:1"><button class="btn line small" id="kv-go" type="button">Go</button></div></div>
-      <p class="muted small" style="margin:0">Hidden from her: To deliver, Coming up, Special days, Issue a voucher, Manage ziggy, and the Bangkok tab until it opens for her.</p>
+      <p class="muted small" style="margin:0">Hidden from her: To deliver, Coming up, Special days, Issue a voucher, Manage ziggy, and the Travel tab until it opens for her.</p>
       <button class="btn" id="kv-exit" type="button">Back to my view</button>
     </div>`, (b) => {
     b.querySelector('#kv-replay').onclick = () => { S.replay = true; S.openedLocal = null; S.tab = 'today'; closeSheet(); renderApp(); scroller()?.scrollTo(0, 0); };
@@ -330,12 +330,12 @@ const unlockDay = () => S.drops.find((d) => d.kind === 'unlock' && d.show_on)?.s
 const mapOpen = () => S.me.who === 'jaa' || (!!unlockDay() && TODAY >= unlockDay());
 
 function renderApp() {
-  if (S.tab === 'bangkok' && !mapOpen()) S.tab = 'today';
+  if (S.tab === 'travel' && !mapOpen()) S.tab = 'today';
   if (S.tab === 'manage' && S.me.who !== 'jaa') S.tab = 'today';
   const seenWallet = Number(localStorage.getItem('ziggy-wallet-seen-' + S.me.who) || 0);
   const walletNew = S.vouchers.some((v) => !v.redeemed_at && v.id > seenWallet);
   const mapNew = !localStorage.getItem('ziggy-map-seen-' + S.me.who);
-  const tabs = [['today', 'Today'], ['wallet', 'Wallet', walletNew], ['us', 'Us'], ...(mapOpen() ? [['bangkok', 'Bangkok', mapNew]] : [])];
+  const tabs = [['today', 'Today'], ['wallet', 'Wallet', walletNew], ['us', 'Us'], ...(mapOpen() ? [['travel', 'Travel', mapNew]] : [])];
   app.innerHTML = `
   <div class="shell">
     <header class="top">
@@ -351,11 +351,11 @@ function renderApp() {
   <nav class="nav" aria-label="Sections">
     ${tabs.map(([k, l, isNew]) => `<button data-tab="${k}" class="${isNew && S.tab !== k ? 'new' : ''}" ${S.tab === k ? 'aria-current="page"' : ''}>${l}</button>`).join('')}
   </nav>`;
-  $('.nav').onclick = (e) => { const t = e.target.closest('button')?.dataset.tab; if (t && t !== S.tab) { S.tab = t; thump(false); renderApp(); scroller()?.scrollTo(0, 0); } };
+  $('.nav').onclick = (e) => { const t = e.target.closest('button')?.dataset.tab; if (t === 'travel' && S.tab === 'travel' && S.trip) { S.trip = null; S.here = null; thump(false); viewTravel(); scroller()?.scrollTo(0, 0); return; } if (t && t !== S.tab) { S.tab = t; thump(false); renderApp(); scroller()?.scrollTo(0, 0); } };
   $('#settings').onclick = openSettings;
   $('#kc-pill')?.addEventListener('click', kcViewSheet);
   bindCounter();
-  ({ today: viewToday, wallet: viewWallet, us: viewUs, bangkok: viewBangkok, manage: viewManage })[S.tab]();
+  ({ today: viewToday, wallet: viewWallet, us: viewUs, travel: viewTravel, manage: viewManage })[S.tab]();
   if (!S.calm) $('#view').classList.add('enter');
   S.calm = false;
 }
@@ -697,7 +697,7 @@ function specialDaysHTML() {
   const ahead = S.drops.filter((d) => d.show_on && d.show_on >= TODAY).sort((a, b) => a.show_on.localeCompare(b.show_on));
   const when = (day) => fmt(day, { month: 'short', day: 'numeric', ...(day.slice(0, 4) !== TODAY.slice(0, 4) ? { year: 'numeric' } : {}) });
   return `<div class="section-head"><h2>Special days</h2><button class="btn line small" id="add-day">Add a day</button></div>
-    ${ahead.length ? `<ul class="days" id="days">${ahead.map((d) => `<li><button type="button" data-day="${d.id}"><time>${when(d.show_on)}</time><span><b>${esc(d.title)}</b><small>${d.voucher_title ? esc(d.voucher_title) : 'a surprise from the treat list'}${d.kind === 'unlock' ? ', opens Bangkok for her' : ''}</small></span></button></li>`).join('')}</ul>`
+    ${ahead.length ? `<ul class="days" id="days">${ahead.map((d) => `<li><button type="button" data-day="${d.id}"><time>${when(d.show_on)}</time><span><b>${esc(d.title)}</b><small>${d.voucher_title ? esc(d.voucher_title) : 'a surprise from the treat list'}${d.kind === 'unlock' ? ', opens Travel for her' : ''}</small></span></button></li>`).join('')}</ul>`
       : '<p class="empty">No special days coming up. Add one for your next trip or date.</p>'}
     <p class="note-small">Monthsaries on the 1st happen on their own. Every special day gives ${esc(name('kc'))} +${XP.special} XP and a treat.</p>`;
 }
@@ -719,7 +719,7 @@ function dayForm(d) {
         <label class="field"><span>Fine print</span><input name="vs" maxlength="70" placeholder="anything you want at the gate" value="${esc(d?.voucher_sub || '')}"></label>
         <div class="field"><span>Card</span><div class="seg" id="tier">${tiers.map(([k, l]) => `<button type="button" data-t="${k}" aria-pressed="${tier === k}">${l}</button>`).join('')}</div></div>
       </div>
-      ${d?.kind === 'unlock' ? '<p class="muted small" style="margin:0">This day also opens the Bangkok tab for her, so moving it moves that too.</p>' : ''}
+      ${d?.kind === 'unlock' ? '<p class="muted small" style="margin:0">This day also opens the Travel tab for her, so moving it moves that too.</p>' : ''}
       <button class="btn" type="submit">${editing ? 'Save' : 'Add special day'}</button>
       ${editing ? '<button class="btn danger" type="button" id="del">Delete</button>' : ''}
     </form>`, (b) => {
@@ -968,129 +968,411 @@ function momentForm(m) {
   });
 }
 
-/* ================= bangkok ================= */
-let leafletReady;
+/* ================= travel ================= */
+// Choose a map (one per country), then pin places, stamp the ones you've been to (+2 XP for baby KC each).
+const TRAVEL_XP = 2;
+const QUICK = ['jp', 'kr', 'tw', 'hk', 'sg', 'vn', 'id', 'ph'];
+let leafletReady, atlasReady;
 function loadLeaflet() {
   return leafletReady ||= new Promise((res, rej) => {
     const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css'; document.head.appendChild(css);
-    const s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js'; s.onload = res; s.onerror = rej; document.head.appendChild(s);
+    const s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js'; s.onload = res; s.onerror = () => { leafletReady = null; rej(); }; document.head.appendChild(s);
   });
 }
+// Country outlines + map boxes live in countries.js (bundled, works offline).
+const loadAtlas = () => atlasReady ||= import('./countries.js').then((m) => new Map(m.COUNTRIES.map(([code, nm, d, box, al]) => [code.toLowerCase(), { code: code.toLowerCase(), name: nm, d, box, al }])));
+const placeCountry = (p) => (p.country || 'th').toLowerCase();
+const been = (p) => !!p.visited_at;
 const statusText = (s) => s === 'both' ? 'we both want this' : s === 'veto' ? 'vetoed' : `${name(s)} wants this`;
-const pinClass = (s) => s === 'both' ? '' : s === 'veto' ? 'veto' : 'one';
+const pinClass = (p) => been(p) ? 'been' : p.status === 'both' ? '' : p.status === 'veto' ? 'veto' : 'one';
 
-async function viewBangkok() {
+function trips() {
+  const list = [...(S.countries || [])].sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0) || a.id - b.id);
+  const have = new Set(list.map((c) => c.code));
+  for (const p of S.places) { const c = placeCountry(p); if (!have.has(c)) { have.add(c); list.push({ id: -have.size, code: c, name: c === 'th' ? 'Thailand' : c.toUpperCase() }); } }
+  return list;
+}
+const tripPlaces = (code) => S.places.filter((p) => placeCountry(p) === code);
+const tripCount = (code) => { const ps = tripPlaces(code).filter((p) => p.status !== 'veto'); return { all: ps.length, been: ps.filter(been).length }; };
+
+// The hologram: the country's outline floating between two silver discs. The base ring fills as you stamp places.
+function holoSVG(uid, d, pct) {
+  const u = 'h' + uid;
+  return `<svg viewBox="0 0 300 330" aria-hidden="true">
+    <defs>
+      <clipPath id="${u}c"><path d="${d}" transform="translate(72 70) scale(1.56)"/></clipPath>
+    </defs>
+    <path class="beam" d="M84 282 L102 60 L198 60 L216 282 Z" fill="url(#tv-beam)"/>
+    <path d="M102 60 L84 282 M198 60 L216 282" stroke="rgba(207,194,255,.14)" stroke-width="1"/>
+    <g class="disc-top">
+      <path d="M74 42 v8 a76 14 0 0 0 152 0 v-8" fill="url(#tv-edge)"/>
+      <ellipse cx="150" cy="42" rx="76" ry="14" fill="url(#tv-lid)"/>
+      <ellipse cx="150" cy="58" rx="48" ry="5" fill="#cbbcff" opacity=".55" filter="url(#tv-blur)"/>
+    </g>
+    <g class="holo">
+      <path d="${d}" transform="translate(72 70) scale(1.56)" fill="#a98ff0" opacity=".55" filter="url(#tv-glow)"/>
+      <path class="holo-fill" d="${d}" transform="translate(72 70) scale(1.56)" fill="url(#tv-fill)" fill-rule="evenodd"/>
+      <g clip-path="url(#${u}c)"><rect class="scan" x="60" y="56" width="180" height="180" fill="url(#tv-scan)"/></g>
+      <path d="${d}" transform="translate(72 70) scale(1.56)" fill="none" stroke="#f4f0ff" stroke-width="1" vector-effect="non-scaling-stroke" stroke-linejoin="round" opacity=".9"/>
+    </g>
+    <path d="M40 278 v14 a110 26 0 0 0 220 0 v-14" fill="url(#tv-baseedge)"/>
+    <ellipse cx="150" cy="278" rx="110" ry="26" fill="url(#tv-base)"/>
+    <ellipse cx="150" cy="276" rx="74" ry="15" fill="url(#tv-emit)"/>
+    <ellipse cx="150" cy="278" rx="94" ry="20.5" fill="none" stroke="rgba(0,0,0,.45)" stroke-width="1.2" stroke-dasharray="1 4"/>
+    <ellipse cx="150" cy="278" rx="102" ry="23.5" fill="none" stroke="rgba(0,0,0,.25)" stroke-width="2.4"/>
+    ${pct > 0 ? `<ellipse class="prog" cx="150" cy="278" rx="102" ry="23.5" fill="none" stroke="#a98ff0" stroke-width="2.4" pathLength="100" stroke-dasharray="${pct} 100" stroke-linecap="round"/>` : ''}
+  </svg>`;
+}
+const HOLO_DEFS = `<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <radialGradient id="tv-lid" cx="42%" cy="30%" r="80%"><stop offset="0" stop-color="#fbfbfa"/><stop offset=".45" stop-color="#a6a6a4"/><stop offset="1" stop-color="#262626"/></radialGradient>
+  <linearGradient id="tv-edge" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9a9a98"/><stop offset="1" stop-color="#1a1a1a"/></linearGradient>
+  <radialGradient id="tv-base" cx="50%" cy="28%" r="75%"><stop offset="0" stop-color="#f4f4f2"/><stop offset=".55" stop-color="#9a9a98"/><stop offset="1" stop-color="#3c3c3c"/></radialGradient>
+  <linearGradient id="tv-baseedge" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c4c4c2"/><stop offset="1" stop-color="#2e2e2e"/></linearGradient>
+  <radialGradient id="tv-emit" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#e6dcff" stop-opacity=".95"/><stop offset=".45" stop-color="#a98ff0" stop-opacity=".55"/><stop offset="1" stop-color="#a98ff0" stop-opacity="0"/></radialGradient>
+  <linearGradient id="tv-beam" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#a98ff0" stop-opacity=".30"/><stop offset=".5" stop-color="#a98ff0" stop-opacity=".05"/><stop offset="1" stop-color="#cfc2ff" stop-opacity=".14"/></linearGradient>
+  <linearGradient id="tv-fill" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f3eeff" stop-opacity=".62"/><stop offset=".5" stop-color="#a98ff0" stop-opacity=".26"/><stop offset="1" stop-color="#dff3ff" stop-opacity=".5"/></linearGradient>
+  <pattern id="tv-scan" width="6" height="3.4" patternUnits="userSpaceOnUse"><rect width="6" height="1" fill="#fff" fill-opacity=".26"/></pattern>
+  <filter id="tv-glow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="5"/></filter>
+  <filter id="tv-blur" x="-50%" y="-200%" width="200%" height="500%"><feGaussianBlur stdDeviation="4"/></filter>
+</defs></svg>`;
+const NEW_D = 'M50 20 V80 M20 50 H80';
+
+async function viewTravel() {
   localStorage.setItem('ziggy-map-seen-' + S.me.who, '1');
-  const v = $('#view');
-  const cats = [...new Set(S.places.map((p) => p.category))].filter((c) => CATS[c]);
-  if (S.catFilter !== 'all' && !cats.includes(S.catFilter)) S.catFilter = 'all';
-  const shown = S.places.filter((p) => S.catFilter === 'all' || p.category === S.catFilter)
-    .sort((a, b) => (a.status === 'veto') - (b.status === 'veto') || a.name.localeCompare(b.name));
-  v.innerHTML = `
-    <p class="since">Bangkok, someday. ${S.places.filter((p) => p.status !== 'veto').length} spots so far.</p>
-    <div class="map-wrap"><div id="map" aria-label="Map of Bangkok"></div>
-      <button class="btn map-add" id="add-spot">Add a spot</button></div>
-    ${cats.length > 1 ? `<div class="chips" id="chips"><button class="chip" data-c="all" aria-pressed="${S.catFilter === 'all'}">All</button>${cats.map((c) => `<button class="chip" data-c="${c}" aria-pressed="${S.catFilter === c}">${CATS[c]}</button>`).join('')}</div>` : ''}
-    ${shown.length ? `<ul class="places" id="plist">${shown.map((p) => `<li><button data-id="${p.id}"><span class="pin ${pinClass(p.status)}"></span><span><span class="nm">${esc(p.name)}</span><span class="meta">${esc(CATS[p.category] || 'Spot')}${p.tiktok ? ', has a TikTok' : ''}</span></span><span class="st">${esc(statusText(p.status))}</span></button></li>`).join('')}</ul>`
-      : `<p class="empty">No spots yet. Tap Add a spot and paste the first TikTok.</p>`}`;
-  $('#add-spot').onclick = addSpot;
-  $('#chips')?.addEventListener('click', (e) => { const c = e.target.closest('.chip')?.dataset.c; if (c) { S.catFilter = c; viewBangkok(); } });
-  $('#plist')?.addEventListener('click', (e) => { const id = e.target.closest('button')?.dataset.id; if (id) placeSheet(S.places.find((p) => p.id === Number(id))); });
+  if (S.trip && !trips().some((t) => t.code === S.trip)) S.trip = null;
+  return S.trip ? viewTrip() : viewMaps();
+}
 
-  try { await loadLeaflet(); } catch { $('#map').innerHTML = '<p class="empty" style="padding:20px">The map couldn’t load. Check your connection.</p>'; return; }
+async function viewMaps() {
+  const v = $('#view');
+  S.map?.remove(); S.map = null;
+  const atlas = await loadAtlas();
+  if (S.tab !== 'travel' || S.trip) return;
+  const list = trips();
+  v.innerHTML = `${HOLO_DEFS}
+    <p class="since">Where to next?</p>
+    <p class="maps-hint">Choose a map</p>
+    <div class="maps" id="maps">
+      ${list.map((t, i) => { const a = atlas.get(t.code); const c = tripCount(t.code); const pct = c.all ? Math.round(c.been / c.all * 100) : 0;
+        return `<button class="map-card" data-code="${t.code}">
+          <span class="mc-top"><span>Map ${pad(i + 1)}</span><span>${c.been ? `${c.been} stamped` : t.code.toUpperCase()}</span></span>
+          <span class="mc-stage">${holoSVG(t.code, a?.d || 'M50 44a6 6 0 1 0 .1 0Z', pct)}</span>
+          <span class="mc-name">${esc(t.name || a?.name)}</span>
+          <span class="mc-sub">${c.all ? `${c.all} ${plural(c.all, 'place')}${c.been ? `, ${c.been} been` : ''}` : 'No places yet'}</span>
+        </button>`; }).join('')}
+      <button class="map-card new" id="new-map">
+        <span class="mc-top"><span>Map ${pad(list.length + 1)}</span><span>New</span></span>
+        <span class="mc-stage">${holoSVG('new', NEW_D, 0)}</span>
+        <span class="mc-name">Add a country</span>
+        <span class="mc-sub">Somewhere we want to go</span>
+      </button>
+    </div>
+    <div class="map-dots" id="map-dots">${[...list, 0].map((_, i) => `<i class="${i === 0 ? 'on' : ''}"></i>`).join('')}</div>
+    <p class="maps-foot">Swipe to choose, tap to open</p>`;
+  const rail = $('#maps'), cards = [...rail.children], dots = [...$('#map-dots').children];
+  let raf = 0, cur = -1;
+  const paint = () => {
+    raf = 0;
+    const mid = rail.scrollLeft + rail.clientWidth / 2;
+    let best = 0, bd = 1e9;
+    cards.forEach((c, i) => {
+      const off = (c.offsetLeft + c.offsetWidth / 2 - mid) / c.offsetWidth;
+      c.style.setProperty('--o', Math.max(-1.4, Math.min(1.4, off)).toFixed(3));
+      c.style.setProperty('--a', Math.min(1, Math.abs(off)).toFixed(3));
+      if (Math.abs(off) < bd) { bd = Math.abs(off); best = i; }
+    });
+    if (best !== cur) { cur = best; cards.forEach((c, i) => c.classList.toggle('on', i === best)); dots.forEach((d, i) => d.classList.toggle('on', i === best)); S.mapIndex = best; if (bd < .2) navigator.vibrate?.(6); }
+  };
+  rail.addEventListener('scroll', () => { raf ||= requestAnimationFrame(paint); }, { passive: true });
+  const start = Math.min(S.mapIndex ?? 0, cards.length - 1);
+  rail.scrollLeft = cards[start].offsetLeft - (rail.clientWidth - cards[start].offsetWidth) / 2;
+  paint();
+  rail.addEventListener('click', (e) => {
+    const c = e.target.closest('.map-card'); if (!c) return;
+    const i = cards.indexOf(c);
+    if (i !== cur) return rail.scrollTo({ left: c.offsetLeft - (rail.clientWidth - c.offsetWidth) / 2, behavior: 'smooth' });
+    if (c.id === 'new-map') return addCountry();
+    thump(false); c.classList.add('go');
+    setTimeout(() => { S.trip = c.dataset.code; viewTravel(); scroller()?.scrollTo(0, 0); }, 380);
+  });
+}
+
+function addCountry() {
+  loadAtlas().then((atlas) => {
+    const have = new Set(trips().map((t) => t.code));
+    const all = [...atlas.values()];
+    const row = (c) => `<li><button data-c="${c.code}" ${have.has(c.code) ? 'disabled' : ''}><svg viewBox="0 0 100 100" aria-hidden="true"><path d="${c.d}"/></svg><span>${esc(c.name)}</span>${have.has(c.code) ? '<small>already a map</small>' : ''}</button></li>`;
+    openSheet(`<h2>Add a country</h2><p class="lead">It becomes a new map you can swipe to.</p>
+      <input class="search" id="cq" placeholder="Search a country or city" autocomplete="off" autocapitalize="words">
+      <ul class="countries" id="cl">${QUICK.map((k) => atlas.get(k)).filter(Boolean).map(row).join('')}</ul>`, (b) => {
+      const cl = b.querySelector('#cl'), q = b.querySelector('#cq');
+      q.oninput = () => {
+        const s = q.value.trim().toLowerCase();
+        const hits = !s ? QUICK.map((k) => atlas.get(k)).filter(Boolean)
+          : all.filter((c) => c.name.toLowerCase().includes(s) || c.al.split(' ').some((w) => w.startsWith(s)) || (s.length > 3 && c.al.includes(s)) || c.code === s)
+            .sort((a, z) => a.name.toLowerCase().startsWith(s) ? -1 : z.name.toLowerCase().startsWith(s) ? 1 : 0).slice(0, 30);
+        cl.innerHTML = hits.length ? hits.map(row).join('') : '<li class="muted small" style="padding:14px 0">No country by that name. Try another spelling.</li>';
+      };
+      cl.onclick = async (e) => {
+        const btn = e.target.closest('button[data-c]'); if (!btn || btn.disabled) return;
+        btn.disabled = true;
+        const c = atlas.get(btn.dataset.c);
+        try {
+          await S.be.addCountry({ code: c.code, name: c.name, sort: trips().length, added_by: S.me.who });
+          S.countries = await S.be.countries();
+          S.mapIndex = trips().findIndex((t) => t.code === c.code);
+          closeSheet(); thump(true); viewTravel(); toast(`New map: ${c.name}`);
+        } catch { btn.disabled = false; toast('Didn’t save. Try again.'); }
+      };
+    });
+  });
+}
+
+function tripMore(t, ps) {
+  const isReal = t.id > 0;
+  openSheet(`<h2>${esc(t.name)}</h2>
+    <p class="lead">${ps.length ? `${ps.length} ${plural(ps.length, 'place')} on this map.` : 'No places on this map yet.'}</p>
+    <div class="stack-y">
+      ${isReal ? `<button class="btn danger" id="rm">Remove this map</button>
+      <p class="muted small" style="margin:0">${ps.length ? 'This also deletes its places. Any XP from places you’ve been to stays.' : 'You can add it back any time.'}</p>` : '<p class="muted small" style="margin:0">This map is here because it has places. It goes away when they do.</p>'}
+    </div>`, (b) => {
+    const rm = b.querySelector('#rm'); if (!rm) return;
+    rm.onclick = async () => {
+      if (!rm.dataset.sure) { rm.dataset.sure = '1'; rm.textContent = ps.length ? `Tap again: delete map and ${ps.length} ${plural(ps.length, 'place')}` : 'Tap again to remove'; return; }
+      try {
+        for (const p of ps) await S.be.deletePlace(p.id);
+        await S.be.deleteCountry(t.id);
+        [S.countries, S.places] = await Promise.all([S.be.countries(), S.be.places()]);
+        S.trip = null; S.mapIndex = 0; closeSheet(); viewTravel(); toast('Map removed');
+      } catch { toast('Didn’t remove. Try again.'); }
+    };
+  });
+}
+
+const ICON_LOC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/><circle cx="12" cy="12" r="7"/></svg>';
+const TICK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 12.5l4 4 8-9"/></svg>';
+const km = (a, b) => { const R = 6371, r = Math.PI / 180, dLat = (b.lat - a.lat) * r, dLng = (b.lng - a.lng) * r; const x = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dLng / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(x)); };
+const far = (d) => d < 1 ? `${Math.round(d * 1000 / 50) * 50 || 50} m away` : d < 20 ? `${d.toFixed(1)} km away` : `${Math.round(d)} km away`;
+
+function placeRow(p) {
+  const d = S.here ? km(S.here, p) : null;
+  return `<li class="${been(p) ? 'is-been' : ''} ${p.status === 'veto' ? 'is-veto' : ''}" data-row="${p.id}">
+    <button class="tick" data-tick="${p.id}" aria-label="${been(p) ? 'Been here. Tap to undo' : 'Mark as been'}" aria-pressed="${been(p)}">${TICK}</button>
+    <button class="pl" data-id="${p.id}"><span class="nm">${esc(p.name)}</span>
+      <span class="meta">${been(p) ? `Been, ${fmt(p.visited_at.slice(0, 10), { month: 'short', day: 'numeric', year: 'numeric' })}` : esc(CATS[p.category] || 'Spot')}${d !== null ? `, ${far(d)}` : ''}${p.tiktok ? ', has a TikTok' : ''}</span></button>
+    <span class="st">${been(p) ? '<span class="stamp-mini">been</span>' : p.status === 'veto' ? 'vetoed' : p.status === 'both' ? '' : esc(name(p.status).replace(/^baby /, ''))}</span>
+  </li>`;
+}
+
+async function viewTrip() {
+  const v = $('#view'), code = S.trip;
+  const atlas = await loadAtlas();
+  if (S.tab !== 'travel' || S.trip !== code) return;
+  const t = trips().find((x) => x.code === code), a = atlas.get(code);
+  const all = tripPlaces(code);
+  const mode = S.tripMode || localStorage.getItem('ziggy-trip-mode') || 'map';
+  const cats = [...new Set(all.map((p) => p.category))].filter((c) => CATS[c]);
+  if (S.catFilter !== 'all' && !cats.includes(S.catFilter)) S.catFilter = 'all';
+  const shown = all.filter((p) => S.catFilter === 'all' || p.category === S.catFilter);
+  const order = (x, y) => S.here ? km(S.here, x) - km(S.here, y) : (x.status === 'veto') - (y.status === 'veto') || x.name.localeCompare(y.name);
+  const togo = shown.filter((p) => !been(p)).sort(order);
+  const done = shown.filter(been).sort((x, y) => y.visited_at.localeCompare(x.visited_at));
+  const c = tripCount(code), pct = c.all ? c.been / c.all * 100 : 0;
+  v.innerHTML = `
+    <div class="trip-top">
+      <button class="back" id="trip-back">All maps</button>
+      <button class="icon-btn" id="trip-more" aria-label="Map options"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="6" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="18" cy="12" r="1.4"/></svg></button>
+    </div>
+    <div class="trip-head">
+      <svg class="trip-sil" viewBox="0 0 100 100" aria-hidden="true"><path d="${a?.d || ''}"/></svg>
+      <div><h2 class="trip-name">${esc(t.name)}</h2>
+      <p class="trip-stat">${c.all ? `${c.been} of ${c.all} been` : 'Nothing pinned yet'}<span>+${TRAVEL_XP} XP for ${esc(name('kc'))} each</span></p></div>
+    </div>
+    <div class="trip-bar"><i style="width:${pct}%"></i></div>
+    <div class="mode" id="mode"><button data-m="map" aria-pressed="${mode === 'map'}">Map</button><button data-m="list" aria-pressed="${mode === 'list'}">List</button></div>
+    ${mode === 'map' ? `<div class="map-wrap"><div id="map" aria-label="Map of ${esc(t.name)}"></div>
+      <button class="map-btn" id="locate" aria-label="Show where we are">${ICON_LOC}</button>
+      <button class="btn small map-add" id="add-spot">Add a place</button></div>` : `<button class="btn line add-line" id="add-spot">Add a place</button>`}
+    ${S.here ? `<p class="near-note">Nearest first<button class="btn quiet small" id="unnear">Clear</button></p>` : ''}
+    ${cats.length > 1 ? `<div class="chips" id="chips"><button class="chip" data-c="all" aria-pressed="${S.catFilter === 'all'}">All</button>${cats.map((k) => `<button class="chip" data-c="${k}" aria-pressed="${S.catFilter === k}">${CATS[k]}</button>`).join('')}</div>` : ''}
+    ${togo.length ? `<div class="section-head"><h2>To go, ${togo.length}</h2></div><ul class="places" id="plist">${togo.map(placeRow).join('')}</ul>` : ''}
+    ${done.length ? `<div class="section-head"><h2>Been, ${done.length}</h2></div><ul class="places been-list" id="blist">${done.map(placeRow).join('')}</ul>` : ''}
+    ${!all.length ? `<p class="empty">No places yet. Tap Add a place and search the name from the TikTok or your notes.</p>` : ''}`;
+
+  $('#trip-back').onclick = () => { S.trip = null; S.here = null; thump(false); viewTravel(); scroller()?.scrollTo(0, 0); };
+  $('#trip-more').onclick = () => tripMore(t, all);
+  $('#mode').onclick = (e) => { const m = e.target.closest('button')?.dataset.m; if (!m || m === mode) return; S.tripMode = m; try { localStorage.setItem('ziggy-trip-mode', m); } catch {} viewTrip(); };
+  $('#add-spot').onclick = () => addSpot(t);
+  $('#unnear')?.addEventListener('click', () => { S.here = null; viewTrip(); });
+  $('#chips')?.addEventListener('click', (e) => { const k = e.target.closest('.chip')?.dataset.c; if (k) { S.catFilter = k; viewTrip(); } });
+  v.querySelectorAll('.places').forEach((ul) => ul.addEventListener('click', (e) => {
+    const tk = e.target.closest('[data-tick]'); if (tk) return toggleBeen(S.places.find((p) => p.id === Number(tk.dataset.tick)), tk);
+    const id = e.target.closest('[data-id]')?.dataset.id; if (id) placeSheet(S.places.find((p) => p.id === Number(id)));
+  }));
+  if (mode !== 'map') { S.map?.remove(); S.map = null; return; }
+  $('#locate').onclick = locate;
+
+  try { await loadLeaflet(); } catch { $('#map').innerHTML = '<p class="empty" style="padding:20px">The map couldn’t load. Check your connection. The list still works.</p>'; return; }
   if (!$('#map')) return;
   S.map?.remove();
   const L = window.L;
-  const map = L.map('map', { zoomControl: false, attributionControl: true }).setView([13.7466, 100.5393], 12);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-    subdomains: 'abcd', maxZoom: 19, attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-  }).addTo(map);
+  const map = L.map('map', { zoomControl: false, attributionControl: true, worldCopyJump: true });
+  map.attributionControl.setPrefix(false);
+  addTiles(map);
   const pts = [];
   for (const p of shown) {
-    const icon = L.divIcon({ className: '', html: `<span class="pin ${pinClass(p.status)}" style="display:block"></span>`, iconSize: [14, 14], iconAnchor: [7, 7] });
-    L.marker([p.lat, p.lng], { icon, title: p.name }).addTo(map).on('click', () => placeSheet(p));
+    const icon = L.divIcon({ className: '', html: `<span class="pin ${pinClass(p)}" style="display:block">${been(p) ? TICK : ''}</span>`, iconSize: [16, 16], iconAnchor: [8, 8] });
+    L.marker([p.lat, p.lng], { icon, title: p.name, zIndexOffset: been(p) ? -100 : 0 }).addTo(map).on('click', () => placeSheet(p));
     pts.push([p.lat, p.lng]);
   }
   if (pts.length > 1) map.fitBounds(pts, { padding: [40, 40], maxZoom: 14 });
   else if (pts.length === 1) map.setView(pts[0], 14);
+  else if (a) map.fitBounds([[a.box[1], a.box[0]], [a.box[3], a.box[2]]], { padding: [10, 10] });
+  else map.setView([13.7466, 100.5393], 11);
+  if (S.here) showHere(map);
   S.map = map;
 }
 
+// Map pictures come from OpenStreetMap (free, no key). If that server ever fails, a second free OpenStreetMap server takes over.
+// The dark look is a filter in styles.css.
+const TILES = [
+  ['https://tile.openstreetmap.org/{z}/{x}/{y}.png', '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'],
+  ['https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png', '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, OSM France'],
+];
+function addTiles(map, i = 0) {
+  const [url, attribution] = TILES[i];
+  const layer = window.L.tileLayer(url, { maxZoom: 19, attribution, subdomains: 'abc', crossOrigin: 'anonymous' }).addTo(map);
+  let ok = 0, bad = 0;
+  layer.on('tileload', () => { ok++; });
+  layer.on('tileerror', () => {
+    if (++bad < 4 || ok) return;
+    if (TILES[i + 1] && navigator.onLine !== false) { bad = -1e9; map.removeLayer(layer); addTiles(map, i + 1); }
+    else if (bad === 4) { const n = document.createElement('p'); n.className = 'map-note'; n.textContent = 'The map pictures aren’t loading right now. The pins and the list still work.'; map.getContainer().parentElement?.appendChild(n); }
+  });
+}
+
+function locate() {
+  if (!navigator.geolocation) return toast('This phone can’t share location here');
+  const b = $('#locate'); b?.classList.add('busy');
+  navigator.geolocation.getCurrentPosition((pos) => {
+    b?.classList.remove('busy');
+    S.here = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+    viewTrip().then(() => { if (S.map) S.map.setView([S.here.lat, S.here.lng], 15); });
+    toast('Nearest places first');
+  }, () => { b?.classList.remove('busy'); toast('Location is off for ziggy. You can turn it on in Settings.'); }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 });
+}
+function showHere(map) {
+  const icon = window.L.divIcon({ className: '', html: '<span class="here"></span>', iconSize: [18, 18], iconAnchor: [9, 9] });
+  window.L.marker([S.here.lat, S.here.lng], { icon, interactive: false, zIndexOffset: 1000 }).addTo(map);
+}
+
+// Stamp a place as been: +2 XP for baby KC. Undo takes the 2 XP back, so it can't be done twice.
+async function toggleBeen(p, btn) {
+  if (!p || btn?.disabled) return;
+  if (btn) btn.disabled = true;
+  const was = been(p), ref = 'place:' + p.id;
+  const before = xpTotal();
+  try {
+    await S.be.updatePlace(p.id, was ? { visited_at: null, visited_by: null } : { visited_at: new Date().toISOString(), visited_by: S.me.who });
+    if (!was) await S.be.addXp({ who: 'kc', amount: TRAVEL_XP, reason: 'been to ' + p.name, ref });
+    else { const row = S.xp.find((x) => x.ref === ref); if (row) await S.be.deleteXp(row.id); }
+    if (S.asKC) { toast('Just looking: nothing was saved'); if (btn) btn.disabled = false; return; }
+    [S.places, S.xp] = await Promise.all([S.be.places(), S.be.xp()]);
+    const unlocked = was ? [] : await grantLevels();
+    if (!was) {
+      btn?.classList.add('stamping'); thump(true);
+      const row = btn?.closest('li');
+      if (row) { const pop = document.createElement('span'); pop.className = 'tick-pop'; pop.textContent = `+${xpTotal() - before || TRAVEL_XP} XP`; row.appendChild(pop); }
+      setTimeout(() => { viewTrip(); toast(S.me.who === 'kc' ? `Stamped. +${TRAVEL_XP} XP` : `Stamped. +${TRAVEL_XP} XP for ${name('kc')}`); }, 900);
+      if (unlocked.length) setTimeout(() => rewardSheet(unlocked), 1500);
+    } else { thump(false); viewTrip(); toast(`Unstamped. The ${TRAVEL_XP} XP went back.`); }
+  } catch { if (btn) btn.disabled = false; toast('Didn’t save. Try again.'); }
+}
+
 function placeSheet(p) {
+  if (!p) return;
   const isKC = S.me.who === 'kc';
-  const vetoVoucher = S.vouchers.find((v) => !v.redeemed_at && /veto/i.test(v.title) && /bangkok/i.test(v.title));
+  const t = trips().find((x) => x.code === placeCountry(p));
+  const vetoes = S.vouchers.filter((v) => !v.redeemed_at && /veto/i.test(v.title));
+  const keys = [t?.name, ...(placeCountry(p) === 'th' ? ['bangkok', 'thai'] : [])].filter(Boolean).map((k) => k.toLowerCase());
+  const vetoVoucher = vetoes.find((v) => keys.some((k) => v.title.toLowerCase().includes(k))) || vetoes[0];
   const opts = [['both', 'We both want it'], ['kc', `${name('kc')} wants it`], ['jaa', `${name('jaa')} wants it`], ['veto', 'Veto']];
   openSheet(`<h2>${esc(p.name)}</h2>
     <p class="lead">${esc(CATS[p.category] || 'Spot')}. Added by ${esc(name(p.added_by))}.</p>
     ${p.note ? `<p class="quote">${esc(p.note)}</p>` : ''}
     <div class="stack-y">
+      <button class="been-btn ${been(p) ? 'on' : ''}" id="been"><span class="tick" aria-hidden="true">${TICK}</span><span><b>${been(p) ? 'We’ve been here' : 'We went here'}</b><small>${been(p) ? `Stamped ${fmt(p.visited_at.slice(0, 10), { month: 'long', day: 'numeric', year: 'numeric' })}. Tap to undo, the ${TRAVEL_XP} XP goes back.` : `Stamp it: +${TRAVEL_XP} XP for ${esc(name('kc'))}`}</small></span></button>
       <div class="row">
         ${p.tiktok ? `<a class="btn" href="${esc(p.tiktok)}" target="_blank" rel="noopener">Watch the TikTok</a>` : ''}
         <a class="btn line" href="https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}" target="_blank" rel="noopener">Open in Maps</a>
       </div>
-      <div class="field"><span>Who wants it</span><div class="seg" id="st">${opts.map(([k, l]) => `<button type="button" data-s="${k}" aria-pressed="${p.status === k}">${esc(l)}</button>`).join('')}</div></div>
-      <p class="muted small" style="margin:0">${isKC ? (vetoVoucher ? 'Veto uses your Bangkok veto voucher.' : 'Veto needs a Bangkok veto voucher. You don’t have one right now.') : `Only ${esc(name('kc'))} holds vetoes.`}</p>
+      ${been(p) ? '' : `<div class="field"><span>Who wants it</span><div class="seg" id="st">${opts.map(([k, l]) => `<button type="button" data-s="${k}" aria-pressed="${p.status === k}">${esc(l)}</button>`).join('')}</div></div>
+      <p class="muted small" style="margin:0">${isKC ? (vetoVoucher ? `Veto uses your “${esc(vetoVoucher.title)}” voucher.` : 'Veto needs a veto voucher. You don’t have one right now.') : `Only ${esc(name('kc'))} holds vetoes.`}</p>`}
       <div class="row"><button class="btn line" id="edit">Edit</button><button class="btn danger" id="del">Delete</button></div>
     </div>`, (b) => {
-    b.querySelector('#st').onclick = async (e) => {
+    b.querySelector('#been').onclick = () => { closeSheet(); setTimeout(() => toggleBeen(p, $(`[data-tick="${p.id}"]`)), 280); };
+    b.querySelector('#st')?.addEventListener('click', async (e) => {
       const s = e.target.closest('button')?.dataset.s;
       if (!s || s === p.status) return;
       if (s === 'veto') {
         if (!isKC) return toast(`Only ${name('kc')} can veto`);
-        if (!vetoVoucher) return toast('No Bangkok veto in your wallet');
+        if (!vetoVoucher) return toast('No veto voucher in your wallet');
         await S.be.redeemVoucher(vetoVoucher.id, true);
         S.vouchers = await S.be.vouchers();
         thump(true); toast('Vetoed. Voucher used.');
       }
-      try { await S.be.updatePlace(p.id, { status: s }); S.places = await S.be.places(); closeSheet(); viewBangkok(); }
+      try { await S.be.updatePlace(p.id, { status: s }); S.places = await S.be.places(); closeSheet(); viewTrip(); }
       catch { toast('Didn’t save. Try again.'); }
-    };
+    });
     b.querySelector('#edit').onclick = () => placeForm(p);
     const del = b.querySelector('#del');
     del.onclick = async () => {
       if (!del.dataset.sure) { del.dataset.sure = '1'; del.textContent = 'Tap again to delete'; return; }
-      try { await S.be.deletePlace(p.id); S.places = await S.be.places(); closeSheet(); viewBangkok(); toast('Removed'); } catch { toast('Didn’t delete. Try again.'); }
+      try { await S.be.deletePlace(p.id); S.places = await S.be.places(); closeSheet(); viewTrip(); toast('Removed'); } catch { toast('Didn’t delete. Try again.'); }
     };
   });
 }
 
-function addSpot() {
-  openSheet(`<h2>Add a spot</h2><p class="lead">Search the name from the TikTok, then pick the right one.</p>
+function addSpot(t) {
+  openSheet(`<h2>Add a place</h2><p class="lead">Search the name from the TikTok, then pick the right one.</p>
     <form id="sf" class="stack-y">
-      <div class="row"><input class="field-input" name="q" required placeholder="e.g. Jodd Fairs" autofocus style="flex:1;background:var(--raise);border:1px solid var(--line);border-radius:12px;padding:13px 14px;font-size:16px"><button class="btn small" type="submit">Search</button></div>
+      <div class="row"><input class="search" name="q" required placeholder="e.g. a café, a market, a street" autofocus style="flex:1"><button class="btn small" type="submit">Search</button></div>
     </form>
     <ul class="results" id="results"></ul>
-    <div class="row"><button class="btn quiet" id="drop-pin">Can’t find it? Drop a pin on the map instead</button></div>`, (b) => {
+    ${S.map ? '<div class="row"><button class="btn quiet" id="drop-pin">Can’t find it? Drop a pin on the map instead</button></div>' : '<p class="muted small">Can’t find it? Switch to Map and drop a pin.</p>'}`, (b) => {
     const results = b.querySelector('#results');
     b.querySelector('#sf').onsubmit = async (e) => {
       e.preventDefault();
       const q = new FormData(e.target).get('q').trim();
       results.innerHTML = '<li class="muted small" style="padding:12px 0">Searching…</li>';
       try {
-        const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=8&bounded=1&viewbox=100.25,14.10,100.95,13.45&q=${encodeURIComponent(q)}`;
+        // Searches inside this country, favouring whatever part of the map is on screen.
+        const box = S.map ? S.map.getBounds() : null;
+        const vb = box ? `&viewbox=${box.getWest()},${box.getNorth()},${box.getEast()},${box.getSouth()}` : '';
+        const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=8&countrycodes=${t.code}${vb}&q=${encodeURIComponent(q)}`;
         const data = await (await fetch(url, { headers: { 'Accept-Language': 'en' } })).json();
-        if (!data.length) { results.innerHTML = '<li class="muted small" style="padding:12px 0">No match in Bangkok. Try a shorter name, or drop a pin.</li>'; return; }
+        if (!data.length) { results.innerHTML = `<li class="muted small" style="padding:12px 0">No match in ${esc(t.name)}. Try a shorter name, or drop a pin.</li>`; return; }
         results.innerHTML = data.map((r, i) => { const parts = r.display_name.split(', '); return `<li><button data-i="${i}">${esc(r.name || parts[0])}<small>${esc(parts.slice(1, 4).join(', '))}</small></button></li>`; }).join('');
-        results.onclick = (ev) => { const i = ev.target.closest('button')?.dataset.i; if (i == null) return; const r = data[i]; placeForm({ name: r.name || r.display_name.split(', ')[0], lat: Number(r.lat), lng: Number(r.lon) }); };
+        results.onclick = (ev) => { const i = ev.target.closest('button')?.dataset.i; if (i == null) return; const r = data[i]; placeForm({ name: r.name || r.display_name.split(', ')[0], lat: Number(r.lat), lng: Number(r.lon), country: t.code }); };
       } catch { results.innerHTML = '<li class="muted small" style="padding:12px 0">Search isn’t working right now. Drop a pin instead.</li>'; }
     };
-    b.querySelector('#drop-pin').onclick = () => {
+    b.querySelector('#drop-pin')?.addEventListener('click', () => {
       closeSheet();
       const wrap = $('.map-wrap'); if (!wrap || !S.map) return;
       const hint = document.createElement('div'); hint.className = 'map-hint';
       hint.innerHTML = '<span>Tap the map where it is</span><button class="btn quiet small" style="padding:4px">Cancel</button>';
       wrap.appendChild(hint); wrap.scrollIntoView({ behavior: 'smooth', block: 'center' });
       const done = () => { hint.remove(); S.map.off('click', onTap); };
-      const onTap = (ev) => { done(); placeForm({ name: '', lat: ev.latlng.lat, lng: ev.latlng.lng }); };
+      const onTap = (ev) => { done(); placeForm({ name: '', lat: ev.latlng.lat, lng: ev.latlng.lng, country: t.code }); };
       hint.querySelector('button').onclick = done;
       S.map.on('click', onTap);
-    };
+    });
   });
 }
 
 function placeForm(p) {
   const editing = !!p.id;
-  openSheet(`<h2>${editing ? 'Edit spot' : 'New spot'}</h2>
+  openSheet(`<h2>${editing ? 'Edit place' : 'New place'}</h2>
     <form id="pf">
       <label class="field"><span>Name</span><input name="name" required maxlength="80" value="${esc(p.name || '')}" ${p.name ? '' : 'autofocus'}></label>
       <label class="field"><span>Type</span><select name="category">${Object.entries(CATS).map(([k, l]) => `<option value="${k}" ${p.category === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
@@ -1103,8 +1385,11 @@ function placeForm(p) {
       const row = { name: f.get('name').trim(), category: f.get('category'), tiktok: f.get('tiktok').trim() || null, note: f.get('note').trim() || null };
       try {
         if (editing) await S.be.updatePlace(p.id, row);
-        else await S.be.addPlace({ ...row, lat: p.lat, lng: p.lng, status: S.me.who, added_by: S.me.who });
-        S.places = await S.be.places(); closeSheet(); thump(false); viewBangkok(); toast(editing ? 'Saved' : 'Pinned');
+        else {
+          if (!S.countries.some((c) => c.code === p.country)) { await S.be.addCountry({ code: p.country, name: trips().find((x) => x.code === p.country)?.name || p.country.toUpperCase(), sort: 0, added_by: S.me.who }).catch(() => {}); S.countries = await S.be.countries(); }
+          await S.be.addPlace({ ...row, lat: p.lat, lng: p.lng, country: p.country, status: S.me.who, added_by: S.me.who });
+        }
+        S.places = await S.be.places(); closeSheet(); thump(false); viewTrip(); toast(editing ? 'Saved' : 'Pinned');
       } catch { toast('Didn’t save. Try again.'); }
     };
   });
@@ -1159,7 +1444,7 @@ function viewManage() {
 
     <div class="section-head"><h2>In her wallet</h2></div>
     <ul class="mlist" id="m-vouchers">${unused.map((x) => row('data-voucher', x.id, x.title, x.sub)).join('') || '<li class="muted small">Nothing unused right now.</li>'}</ul>
-    <p class="note-small">Special days are on Today. Timeline moments and Bangkok spots are edited right where they are.</p>`;
+    <p class="note-small">Special days are on Today. Timeline moments and Travel places are edited right where they are.</p>`;
 
   $('#m-back').onclick = () => { S.tab = S.back || 'today'; renderApp(); };
   $('#m-shuffle').onclick = () => { const el = $('#m-nick'); el.classList.remove('pop'); void el.offsetWidth; el.textContent = nickname(addDays(TODAY, Math.floor(Math.random() * 9999) + 1)); el.classList.add('pop'); thump(false); };
@@ -1290,7 +1575,7 @@ function openSettings() {
     b.querySelector('#s-manage')?.addEventListener('click', () => { closeSheet(); S.back = S.tab === 'manage' ? 'today' : S.tab; S.tab = 'manage'; renderApp(); scroller()?.scrollTo(0, 0); });
     b.querySelector('#s-code').onclick = () => { closeSheet(); renderSetPin(true); };
     b.querySelector('#s-backup').onclick = () => {
-      const data = { exported: new Date().toISOString(), timeline: S.timeline, places: S.places, vouchers: S.vouchers, xp: S.xp };
+      const data = { exported: new Date().toISOString(), timeline: S.timeline, countries: S.countries, places: S.places, vouchers: S.vouchers, xp: S.xp };
       const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
       a.download = `ziggy-backup-${TODAY}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
     };
