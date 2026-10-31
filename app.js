@@ -333,7 +333,7 @@ function kcViewSheet() {
     <div class="stack-y">
       <button class="btn line" id="kv-replay" type="button">Replay today’s drop</button>
       <div class="field"><span>See another day</span><div class="row"><input type="date" id="kv-date" value="${esc(PREVIEW || TODAY)}" style="flex:1"><button class="btn line small" id="kv-go" type="button">Go</button></div></div>
-      <p class="muted small" style="margin:0">Hidden from her: To deliver, Coming up, Special days, Issue a voucher, Manage ziggy, and the Travel tab until it opens for her.</p>
+      <p class="muted small" style="margin:0">Hidden from her: To deliver, Coming up, Special days, Issue a voucher, Manage ziggy.</p>
       <button class="btn" id="kv-exit" type="button">Back to my view</button>
     </div>`, (b) => {
     b.querySelector('#kv-replay').onclick = () => { S.replay = true; S.openedLocal = null; S.tab = 'today'; closeSheet(); renderApp(); scroller()?.scrollTo(0, 0); };
@@ -353,8 +353,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ================= shell ================= */
-const unlockDay = () => S.drops.find((d) => d.kind === 'unlock' && d.show_on)?.show_on || S.settings.map_unlock;
-const mapOpen = () => S.me.who === 'jaa' || (!!unlockDay() && TODAY >= unlockDay());
+const mapOpen = () => true; // Travel is open for both of you from day one (it used to wait for Nov 12)
 
 function renderApp() {
   if (S.tab === 'travel' && !mapOpen()) S.tab = 'today';
@@ -751,7 +750,7 @@ function specialDaysHTML() {
   const ahead = S.drops.filter((d) => d.show_on && d.show_on >= TODAY).sort((a, b) => a.show_on.localeCompare(b.show_on));
   const when = (day) => fmt(day, { month: 'short', day: 'numeric', ...(day.slice(0, 4) !== TODAY.slice(0, 4) ? { year: 'numeric' } : {}) });
   return `<div class="section-head"><h2>Special days</h2><button class="btn line small" id="add-day">Add a day</button></div>
-    ${ahead.length ? `<ul class="days" id="days">${ahead.map((d) => `<li><button type="button" data-day="${d.id}"><time>${when(d.show_on)}</time><span><b>${esc(d.title)}</b><small>${d.voucher_title ? esc(d.voucher_title) : 'a surprise from the treat list'}${d.kind === 'unlock' ? ', opens Travel for her' : ''}</small></span></button></li>`).join('')}</ul>`
+    ${ahead.length ? `<ul class="days" id="days">${ahead.map((d) => `<li><button type="button" data-day="${d.id}"><time>${when(d.show_on)}</time><span><b>${esc(d.title)}</b><small>${d.voucher_title ? esc(d.voucher_title) : 'a surprise from the treat list'}</small></span></button></li>`).join('')}</ul>`
       : '<p class="empty">No special days coming up. Add one for your next trip or date.</p>'}
     <p class="note-small">Monthsaries on the 1st happen on their own. Every special day gives ${esc(name('kc'))} +${XP.special} XP and a treat.</p>`;
 }
@@ -773,7 +772,6 @@ function dayForm(d) {
         <label class="field"><span>Fine print</span><input name="vs" maxlength="70" placeholder="anything you want at the gate" value="${esc(d?.voucher_sub || '')}"></label>
         <div class="field"><span>Card</span><div class="seg" id="tier">${tiers.map(([k, l]) => `<button type="button" data-t="${k}" aria-pressed="${tier === k}">${l}</button>`).join('')}</div></div>
       </div>
-      ${d?.kind === 'unlock' ? '<p class="muted small" style="margin:0">This day also opens the Travel tab for her, so moving it moves that too.</p>' : ''}
       <button class="btn" type="submit">${editing ? 'Save' : 'Add special day'}</button>
       ${editing ? '<button class="btn danger" type="button" id="del">Delete</button>' : ''}
     </form>`, (b) => {
